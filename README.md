@@ -10,6 +10,7 @@ The MCP Protocol Validator is a containerized test suite designed to ensure comp
 - **Easy Setup**: Run with a single command using Docker
 - **Detailed Reports**: Generate HTML or JSON reports for compliance analysis
 - **CI Integration**: GitHub Action for continuous validation
+- **Weighted Compliance Scoring**: Prioritizes critical requirements for accurate compliance assessment
 
 ## Features
 
@@ -95,6 +96,32 @@ cd mcp-protocol-validator
 python -m pytest tests/test_roots.py tests/test_sampling.py -v
 ```
 
+## Compliance Scoring System
+
+The validator uses a weighted scoring system to accurately reflect the importance of different requirements:
+
+| Requirement Level | Weight | Impact | Severity |
+|-------------------|--------|--------|----------|
+| MUST (M-prefixed) | 10 | 80% | 🔴 Critical |
+| SHOULD (S-prefixed) | 3 | 15% | 🟠 Medium |
+| MAY (A-prefixed) | 1 | 5% | 🟢 Low |
+
+This weighting ensures that failing critical requirements has a significantly larger impact on the compliance score than failing optional ones. The overall compliance score is calculated using:
+
+```
+ComplianceScore = (10*MustPassed + 3*ShouldPassed + 1*MayPassed) / (10*TotalMust + 3*TotalShould + 1*TotalMay) * 100
+```
+
+Based on the calculated score, implementations are classified into one of these compliance levels:
+
+- **Fully Compliant** (100%): Passes all MUST requirements
+- **Substantially Compliant** (90-99%): Passes most MUST requirements with minor issues
+- **Partially Compliant** (75-89%): Has significant compliance issues
+- **Minimally Compliant** (50-74%): Major interoperability concerns
+- **Non-Compliant** (<50%): Unlikely to be interoperable
+
+For more details, see [Compliance Scoring](docs/compliance-scoring.md).
+
 ## Reports
 
 Reports are generated in the format specified by the `--format` option:
@@ -102,6 +129,16 @@ Reports are generated in the format specified by the `--format` option:
 - **HTML**: Interactive report with detailed test results
 - **Markdown**: Simple text-based report
 - **JSON**: Structured data for programmatic analysis
+
+Each report includes:
+- Overall compliance score and level
+- Breakdown by requirement type (MUST, SHOULD, MAY)
+- Section-by-section compliance details
+- Failed tests categorized by severity
+- Prioritized remediation plan
+- Performance metrics (where available)
+
+See a [sample report](docs/updated-sample-report.md) for an example.
 
 ## Development
 
@@ -123,9 +160,9 @@ docker build -t mcp-protocol-validator .
 
 The test suite is based on the Model Context Protocol specification version 2025-03-26 and covers:
 
-- **MUST** requirements: Essential for compliance
-- **SHOULD** requirements: Recommended practices
-- **MAY** requirements: Optional features
+- **MUST** requirements: Essential for compliance (89 requirements)
+- **SHOULD** requirements: Recommended practices (30 requirements)
+- **MAY** requirements: Optional features (26 requirements)
 
 ## License
 
