@@ -17,6 +17,7 @@ import argparse
 import json
 from pathlib import Path
 import threading
+from typing import Dict, Any, Optional, List, Tuple
 
 # Import the test base framework
 try:
@@ -208,6 +209,186 @@ def run_tests(args):
         print(f"\nTest report generated: {args.report_dir}/stdio-{args.protocol_version}-report.html")
     
     return exit_code
+
+class STDIODockerTester:
+    """Test an MCP STDIO server running in Docker"""
+    
+    def __init__(self, docker_image: str, mount_path: str, protocol_version: str = "2025-03-26", debug: bool = False):
+        self.docker_image = docker_image
+        self.mount_path = os.path.abspath(mount_path)
+        self.protocol_version = protocol_version
+        self.debug = debug
+        self.request_id = 0
+        self.process = None
+        
+    def start_server(self) -> None:
+        """Start the Docker server process"""
+        # Prepare the docker command
+        cmd = [
+            "docker", "run", "-i", "--rm",
+            "--mount", f"type=bind,src={self.mount_path},dst=/projects",
+            self.docker_image, "/projects"
+        ]
+        
+        if self.debug:
+            print(f"Starting Docker container with command: {' '.join(cmd)}")
+            
+        # Start the Docker container with STDIO
+        self.process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False  # Use binary mode for precise control
+        )
+        
+    def stop_server(self) -> None:
+        """Stop the Docker server process"""
+        if self.process:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+            self.process = None
+            
+    def _send_request(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Send a request to the server and get the response"""
+        if not self.process:
+            raise RuntimeError("Server not started")
+            
+        # Create the request
+        self.request_id += 1
+        request = {
+            "jsonrpc": "2.0",
+            "id": f"test_{self.request_id}",
+            "method": method,
+            "params": params
+        }
+        
+        # Send the request
+        request_json = json.dumps(request) + "\n"
+        if self.debug:
+            print(f"Sending request: {request_json.strip()}")
+            
+        self.process.stdin.write(request_json.encode('utf-8'))
+        self.process.stdin.flush()
+        
+        # Read the response
+        response_json = self.process.stdout.readline().decode('utf-8')
+        if self.debug:
+            print(f"Received response: {response_json.strip()}")
+            
+        response = json.loads(response_json)
+        return response
+    
+    def _send_notification(self, method: str, params: Dict[str, Any]) -> None:
+        """Send a notification to the server (no response expected)"""
+        if not self.process:
+            raise RuntimeError("Server not started")
+            
+        # Create the notification
+        notification = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "params": params
+        }
+        
+        # Send the notification
+        notification_json = json.dumps(notification) + "\n"
+        if self.debug:
+            print(f"Sending notification: {notification_json.strip()}")
+            
+        self.process.stdin.write(notification_json.encode('utf-8'))
+        self.process.stdin.flush()
+        
+    def initialize(self) -> Dict[str, Any]:
+        """Initialize the server"""
+        init_params = {
+            "protocolVersion": self.protocol_version,
+            "capabilities": {
+                "roots": {
+                    "listChanged": True
+                }
+            },
+            "clientInfo": {
+                "name": "STDIODockerTester",
+                "version": "1.0.0"
+            }
+        }
+        
+        response = self._send_request("initialize", init_params)
+        
+        # Send the initialized notification
+        self._send_notification("initialized", {})
+        
+        return response
+    
+    def get_tools_list(self) -> List[Dict[str, Any]]:
+        """Get the list of available tools"""
+        response = self._send_request("tools/list", {})
+        return response.get("result", [])
+    
+    def list_directory(self, directory: str) -> List[Dict[str, Any]]:
+        """List contents of a directory"""
+        response = self._send_request("filesystem/list_directory", {"directory": directory})
+        return response.get("result", [])
+    
+    def read_file(self, file_path: str) -> str:
+        """Read the contents of a file"""
+        response = self._send_request("filesystem/read_file", {"file": file_path})
+        return response.get("result", {}).get("content", "")
+    
+    def write_file(self, file_path: str, content: str) -> bool:
+        """Write content to a file"""
+        response = self._send_request("filesystem/write_file", {
+            "file": file_path,
+            "content": content
+        })
+        return "result" in response
+    
+    def run_simple_test(self) -> Tuple[bool, str]:
+        """Run a simple test sequence to verify server functionality"""
+        try:
+            # Start the server
+            self.start_server()
+            
+            # Initialize
+            init_response = self.initialize()
+            if "error" in init_response:
+                return False, f"Initialization failed: {init_response['error']}"
+                
+            protocol_version = init_response.get("result", {}).get("protocolVersion")
+            if protocol_version != self.protocol_version:
+                print(f"Warning: Server responded with protocol version {protocol_version}, requested {self.protocol_version}")
+            
+            # Get tools list
+            tools = self.get_tools_list()
+            if not tools:
+                return False, "Failed to get tools list or list is empty"
+                
+            # Test listing directory
+            files = self.list_directory("/projects")
+            if not isinstance(files, list):
+                return False, "Failed to list directory"
+                
+            # Test writing a file
+            test_content = "This is a test file created by STDIODockerTester"
+            write_success = self.write_file("/projects/test_file.txt", test_content)
+            if not write_success:
+                return False, "Failed to write file"
+                
+            # Test reading a file
+            read_content = self.read_file("/projects/test_file.txt")
+            if read_content != test_content:
+                return False, f"File content doesn't match: expected '{test_content}', got '{read_content}'"
+            
+            return True, "All tests passed successfully"
+            
+        except Exception as e:
+            return False, f"Test failed with error: {str(e)}"
+        finally:
+            self.stop_server()
 
 def main():
     """Run the MCP protocol tests with Docker STDIO transport."""

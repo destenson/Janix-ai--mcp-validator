@@ -64,7 +64,7 @@ python stdio_docker_test.py --protocol-version 2025-03-26
 
 ## Testing Options
 
-### 1. STDIO Docker Testing
+### 1. STDIO Docker Testing (Recommended for Most Users)
 
 For comprehensive validation of STDIO-based MCP server implementations:
 
@@ -84,6 +84,8 @@ python stdio_docker_test.py \
   --run-all-tests \
   --report
 ```
+
+This is the most straightforward approach for testing STDIO-based MCP servers running in Docker containers. The script handles all necessary setup and configuration automatically.
 
 #### Key Features
 
@@ -107,18 +109,49 @@ python stdio_docker_test.py \
 - `--report`: Generate HTML test report
 - `--report-dir`: Directory to store HTML test reports (default: reports/)
 
-#### What the Script Does
+### 2. Advanced Testing with mcp_validator.py
 
-The enhanced script:
-- Creates a Docker network if it doesn't exist
-- Prepares test files including nested directories and various file types
-- Launches the Docker filesystem server with environment variables
-- Configures the environment for STDIO transport
-- Runs the appropriate tests based on the options provided
-- Generates HTML reports if requested
-- Handles server cleanup
+For more advanced testing scenarios and detailed control over the test process, you can use the `mcp_validator.py` script directly. This approach requires Python 3.11 and should be used for HTTP-based MCP servers or for specialized testing scenarios:
 
-### 2. Protocol Version Comparison
+```bash
+# Create a Python 3.11 virtual environment
+python3.11 -m venv .venv-py311
+source .venv-py311/bin/activate
+
+# Install dependencies
+cd mcp-protocol-validator
+pip install -r requirements.txt
+
+# Example: Testing an HTTP-based MCP server
+python mcp_validator.py test \
+  --url http://localhost:8080 \
+  --report ./mcp-compliance-report.html \
+  --format html \
+  --version 2025-03-26
+```
+
+**Important Note**: While `mcp_validator.py` does have STDIO support, testing STDIO servers is more complex with this approach. For STDIO-based Docker servers, we strongly recommend using the `stdio_docker_test.py` script instead, which is specifically designed for this purpose.
+
+#### Key Benefits
+
+- **Fine-grained Control**: More options for controlling the test process
+- **Detailed Reporting**: Generate comprehensive test reports in various formats (HTML, JSON, Markdown)
+- **Module Selection**: Specify which test modules to run (base, resources, tools, prompts, utilities)
+- **Debug Output**: Verbose output for troubleshooting and understanding test flow
+- **Transport Flexibility**: Test both HTTP and STDIO transport mechanisms (though HTTP is preferred)
+
+#### Command Line Options
+
+- `--url`: URL of the MCP server to test (required for HTTP testing)
+- `--server-command`: Command to start a local MCP server (required for STDIO testing)
+- `--report`: Path to save the test report
+- `--format`: Report format (html, json, markdown)
+- `--test-modules`: Comma-separated list of test modules to run (base,resources,tools,prompts,utilities)
+- `--version`: MCP protocol version to test against (2024-11-05 or 2025-03-26)
+- `--debug`: Enable debug output
+- `--stdio-only`: Run only STDIO-compatible tests
+
+### 3. Protocol Version Comparison
 
 To compare how your server implementation behaves with different protocol versions, you can use the `compare_protocol_versions.py` script:
 
@@ -175,7 +208,7 @@ This is particularly useful when:
 - Ensuring backward compatibility
 - Diagnosing protocol-specific issues
 
-### 3. HTTP Transport Testing
+### 4. HTTP Transport Testing
 
 For servers that implement the HTTP transport:
 
@@ -189,7 +222,7 @@ export MCP_PROTOCOL_VERSION="2024-11-05"  # Optional: specify protocol version
 pytest -v tests/
 ```
 
-### 4. Custom STDIO Testing
+### 5. Custom STDIO Testing
 
 For testing other STDIO servers (not using the Docker test script):
 

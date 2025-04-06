@@ -1,3 +1,1 @@
-This is a test file for MCP filesystem server testing.
-It contains multiple lines of text.
-The filesystem server should be able to read this file correctly.
+Test file
