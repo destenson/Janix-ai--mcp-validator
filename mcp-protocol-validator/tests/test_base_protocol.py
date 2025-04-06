@@ -107,7 +107,7 @@ class TestBaseProtocol(MCPBaseTest):
             "id": "test_initialization_1",
             "method": "initialize",
             "params": {
-                "protocolVersion": "2025-03-26",
+                "protocolVersion": self.protocol_version,
                 "capabilities": {
                     "roots": {
                         "listChanged": True
@@ -129,7 +129,7 @@ class TestBaseProtocol(MCPBaseTest):
         
         # Verify the server responds with a supported version
         protocol_version = init_data["result"]["protocolVersion"]
-        assert protocol_version in ["2025-03-26"]
+        assert protocol_version in ["2025-03-26", "2024-11-05"]
         
         # Send initialized notification
         init_notification = self._send_request({
@@ -160,7 +160,7 @@ class TestBaseProtocol(MCPBaseTest):
             "id": "test_capabilities",
             "method": "initialize",
             "params": {
-                "protocolVersion": "2025-03-26",
+                "protocolVersion": self.protocol_version,
                 "capabilities": {},
                 "clientInfo": {
                     "name": "MCPValidator",

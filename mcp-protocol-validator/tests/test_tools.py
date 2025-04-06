@@ -32,7 +32,7 @@ class TestTools(MCPBaseTest):
             "id": "init_tools",
             "method": "initialize",
             "params": {
-                "protocolVersion": "2025-03-26",
+                "protocolVersion": self.protocol_version,
                 "capabilities": {
                     "tools": {}
                 },

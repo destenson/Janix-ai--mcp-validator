@@ -12,13 +12,15 @@ import requests
 import sys
 import time
 import select
-from typing import Dict, Any, Optional
+from pathlib import Path
+from typing import Dict, Any, Optional, Union
 
 # Get environment variables for testing configuration
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8080")
 MCP_CLIENT_URL = os.environ.get("MCP_CLIENT_URL", "http://localhost:8081")
 MCP_TRANSPORT_TYPE = os.environ.get("MCP_TRANSPORT_TYPE", "http")
 MCP_SERVER_PROCESS_ID = os.environ.get("MCP_SERVER_PROCESS", None)
+MCP_PROTOCOL_VERSION = os.environ.get("MCP_PROTOCOL_VERSION", "2025-03-26")
 
 # Global variable to store server process reference if using STDIO
 SERVER_PROCESS = None
@@ -44,6 +46,7 @@ class MCPBaseTest:
         self.server_url = MCP_SERVER_URL
         self.client_url = MCP_CLIENT_URL
         self.transport_type = MCP_TRANSPORT_TYPE
+        self.protocol_version = MCP_PROTOCOL_VERSION
         self.server_capabilities = {}
         self.client_capabilities = {}
         self.session_id = None
@@ -54,6 +57,21 @@ class MCPBaseTest:
             # This would be populated by the test runner in a real implementation
             # For now, we'll have a placeholder
             SERVER_PROCESS = self._get_server_process()
+    
+    def get_schema(self) -> Dict[str, Any]:
+        """Load the JSON schema for the current protocol version.
+        
+        Returns:
+            The loaded JSON schema as a dictionary.
+        """
+        schema_file = f"mcp_schema_{self.protocol_version}.json"
+        schema_path = Path(__file__).parent.parent / "schema" / schema_file
+        
+        if not schema_path.exists():
+            raise FileNotFoundError(f"Schema file for version {self.protocol_version} not found at {schema_path}")
+        
+        with open(schema_path) as f:
+            return json.load(f)
     
     def _get_server_process(self):
         """Get the server process object from the main test runner.

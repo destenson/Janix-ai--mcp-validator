@@ -32,7 +32,7 @@ class TestPrompts(MCPBaseTest):
             "id": "init_prompts",
             "method": "initialize",
             "params": {
-                "protocolVersion": "2025-03-26",
+                "protocolVersion": self.protocol_version,
                 "capabilities": {
                     "prompts": {}
                 },

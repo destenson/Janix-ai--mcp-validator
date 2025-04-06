@@ -32,7 +32,7 @@ class TestResources(MCPBaseTest):
             "id": "init_resources",
             "method": "initialize",
             "params": {
-                "protocolVersion": "2025-03-26",
+                "protocolVersion": self.protocol_version,
                 "capabilities": {
                     "resources": {}
                 },

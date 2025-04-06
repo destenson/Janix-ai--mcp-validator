@@ -34,7 +34,7 @@ class TestUtilities(MCPBaseTest):
             "id": "init_utilities",
             "method": "initialize",
             "params": {
-                "protocolVersion": "2025-03-26",
+                "protocolVersion": self.protocol_version,
                 "capabilities": {
                     "logging": {},
                     "completions": {}

@@ -1,0 +1,193 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Model Context Protocol Schema",
+  "description": "JSON Schema for validating MCP protocol messages",
+  "version": "2025-03-26",
+  
+  "definitions": {
+    "jsonrpc_request": {
+      "type": "object",
+      "required": ["jsonrpc", "method"],
+      "properties": {
+        "jsonrpc": {"enum": ["2.0"]},
+        "id": {
+          "oneOf": [
+            {"type": "string"},
+            {"type": "integer"}
+          ]
+        },
+        "method": {"type": "string"},
+        "params": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    
+    "jsonrpc_response": {
+      "type": "object",
+      "required": ["jsonrpc", "id"],
+      "oneOf": [
+        {
+          "required": ["result"],
+          "properties": {
+            "jsonrpc": {"enum": ["2.0"]},
+            "id": {
+              "oneOf": [
+                {"type": "string"},
+                {"type": "integer"}
+              ]
+            },
+            "result": {}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["error"],
+          "properties": {
+            "jsonrpc": {"enum": ["2.0"]},
+            "id": {
+              "oneOf": [
+                {"type": "string"},
+                {"type": "integer"},
+                {"type": "null"}
+              ]
+            },
+            "error": {
+              "type": "object",
+              "required": ["code", "message"],
+              "properties": {
+                "code": {"type": "integer"},
+                "message": {"type": "string"},
+                "data": {}
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    
+    "jsonrpc_notification": {
+      "type": "object",
+      "required": ["jsonrpc", "method"],
+      "properties": {
+        "jsonrpc": {"enum": ["2.0"]},
+        "method": {"type": "string"},
+        "params": {"type": "object"}
+      },
+      "additionalProperties": false,
+      "not": {
+        "required": ["id"]
+      }
+    },
+    
+    "initialize_request": {
+      "type": "object",
+      "required": ["protocolVersion", "capabilities"],
+      "properties": {
+        "protocolVersion": {"type": "string"},
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "roots": {
+              "type": "object",
+              "properties": {
+                "listChanged": {"type": "boolean"}
+              }
+            },
+            "sampling": {"type": "object"}
+          }
+        },
+        "clientInfo": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "version": {"type": "string"}
+          }
+        }
+      }
+    },
+    
+    "initialize_response": {
+      "type": "object",
+      "required": ["protocolVersion", "capabilities"],
+      "properties": {
+        "protocolVersion": {"type": "string"},
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "logging": {"type": "object"},
+            "prompts": {
+              "type": "object",
+              "properties": {
+                "listChanged": {"type": "boolean"}
+              }
+            },
+            "resources": {
+              "type": "object",
+              "properties": {
+                "subscribe": {"type": "boolean"},
+                "listChanged": {"type": "boolean"}
+              }
+            },
+            "tools": {
+              "type": "object",
+              "properties": {
+                "listChanged": {"type": "boolean"}
+              }
+            }
+          }
+        },
+        "serverInfo": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "version": {"type": "string"}
+          }
+        }
+      }
+    },
+    
+    "resource": {
+      "type": "object",
+      "required": ["uri", "name"],
+      "properties": {
+        "uri": {"type": "string", "format": "uri"},
+        "name": {"type": "string"},
+        "description": {"type": "string"},
+        "mimeType": {"type": "string"},
+        "size": {"type": "integer", "minimum": 0}
+      }
+    },
+    
+    "content": {
+      "type": "object",
+      "required": ["uri"],
+      "oneOf": [
+        {
+          "required": ["text"],
+          "properties": {
+            "uri": {"type": "string", "format": "uri"},
+            "mimeType": {"type": "string"},
+            "text": {"type": "string"}
+          }
+        },
+        {
+          "required": ["blob"],
+          "properties": {
+            "uri": {"type": "string", "format": "uri"},
+            "mimeType": {"type": "string"},
+            "blob": {"type": "string", "contentEncoding": "base64"}
+          }
+        }
+      ]
+    }
+  },
+  
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/definitions/jsonrpc_request"},
+    {"$ref": "#/definitions/jsonrpc_response"},
+    {"$ref": "#/definitions/jsonrpc_notification"}
+  ]
+} 

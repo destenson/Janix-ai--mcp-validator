@@ -39,8 +39,9 @@ def cli():
 @click.option("--report", default="./mcp-compliance-report.html", help="Path to save the test report")
 @click.option("--format", default="html", type=click.Choice(["html", "json", "markdown"]), help="Report format")
 @click.option("--test-modules", help="Comma-separated list of test modules to run (base,resources,tools,prompts,utilities)")
+@click.option("--version", default="2025-03-26", type=click.Choice(["2024-11-05", "2025-03-26"]), help="MCP protocol version to test against")
 @click.option("--debug", is_flag=True, help="Enable debug output, especially for STDIO transport")
-def test(url, server_command, report, format, test_modules, debug):
+def test(url, server_command, report, format, test_modules, version, debug):
     """Run protocol compliance tests against an MCP server."""
     global SERVER_PROCESS
     
@@ -51,6 +52,10 @@ def test(url, server_command, report, format, test_modules, debug):
     
     console.print(f"[bold green]MCP Protocol Validator[/bold green]")
     console.print(f"Testing server at: [bold]{url}[/bold]")
+    console.print(f"Protocol version: [bold]{version}[/bold]")
+    
+    # Set protocol version environment variable for tests
+    os.environ["MCP_PROTOCOL_VERSION"] = version
     
     server_process = None
     if server_command:
@@ -164,15 +169,17 @@ def test(url, server_command, report, format, test_modules, debug):
         SERVER_PROCESS = None
 
 @cli.command()
-def schema():
-    """Print the MCP JSON schema."""
-    schema_path = Path(__file__).parent / "schema" / "mcp_schema.json"
+@click.option("--version", default="2025-03-26", type=click.Choice(["2024-11-05", "2025-03-26"]), help="MCP protocol version to view")
+def schema(version):
+    """Print the MCP JSON schema for the specified version."""
+    schema_file = f"mcp_schema_{version}.json"
+    schema_path = Path(__file__).parent / "schema" / schema_file
     if schema_path.exists():
         with open(schema_path) as f:
             schema = json.load(f)
         console.print_json(json.dumps(schema, indent=2))
     else:
-        console.print("[bold red]Schema file not found![/bold red]")
+        console.print(f"[bold red]Schema file for version {version} not found![/bold red]")
         return 1
 
 if __name__ == "__main__":
