@@ -1,0 +1,406 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/mcp-schema-2025-03-26.json",
+  "title": "MCP Protocol Schema (2025-03-26)",
+  "description": "JSON Schema for the MCP (Model Completion Protocol) version 2025-03-26",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["jsonrpc"],
+  "properties": {
+    "jsonrpc": {
+      "type": "string",
+      "const": "2.0",
+      "description": "JSON-RPC version, must be 2.0"
+    },
+    "id": {
+      "type": ["string", "number"],
+      "description": "Request identifier"
+    },
+    "method": {
+      "type": "string",
+      "description": "The method to invoke"
+    },
+    "params": {
+      "type": "object",
+      "description": "Method parameters"
+    },
+    "result": {
+      "type": ["object", "array", "string", "number", "boolean", "null"],
+      "description": "Result of the method invocation"
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "description": "Error code"
+        },
+        "message": {
+          "type": "string",
+          "description": "Error message"
+        },
+        "data": {
+          "description": "Additional error data"
+        }
+      },
+      "required": ["code", "message"],
+      "description": "Error object"
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "description": "A request object"
+    },
+    {
+      "type": "object",
+      "required": ["jsonrpc", "method"],
+      "not": {
+        "required": ["id"]
+      },
+      "description": "A notification object"
+    },
+    {
+      "type": "object",
+      "required": ["jsonrpc", "result", "id"],
+      "description": "A successful response object"
+    },
+    {
+      "type": "object",
+      "required": ["jsonrpc", "error", "id"],
+      "description": "An error response object"
+    }
+  ],
+  "definitions": {
+    "initialize_request": {
+      "type": "object",
+      "required": ["protocolVersion", "capabilities", "clientInfo"],
+      "properties": {
+        "protocolVersion": {
+          "type": "string",
+          "description": "The protocol version the client supports"
+        },
+        "capabilities": {
+          "type": "object",
+          "description": "The capabilities of the client",
+          "properties": {
+            "tools": {
+              "type": "object",
+              "description": "Tool-related capabilities",
+              "properties": {
+                "listChanged": {
+                  "type": "boolean",
+                  "description": "Whether the client supports tools/list notifications"
+                },
+                "async": {
+                  "type": "boolean",
+                  "description": "Whether the client supports async tool execution"
+                }
+              }
+            },
+            "resources": {
+              "type": "object",
+              "description": "Resource-related capabilities",
+              "properties": {
+                "memory": {
+                  "type": "integer",
+                  "description": "Memory available to the server in megabytes"
+                },
+                "timeout": {
+                  "type": "integer",
+                  "description": "Maximum execution time in seconds"
+                }
+              }
+            },
+            "environment": {
+              "type": "object",
+              "description": "Environment-related capabilities",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "clientInfo": {
+          "type": "object",
+          "description": "Information about the client",
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Name of the client"
+            },
+            "version": {
+              "type": "string",
+              "description": "Version of the client"
+            }
+          }
+        }
+      }
+    },
+    "initialize_response": {
+      "type": "object",
+      "required": ["protocolVersion", "capabilities", "serverInfo"],
+      "properties": {
+        "protocolVersion": {
+          "type": "string",
+          "description": "The protocol version the server selected"
+        },
+        "capabilities": {
+          "type": "object",
+          "description": "The capabilities of the server",
+          "properties": {
+            "tools": {
+              "type": "object",
+              "description": "Tool-related capabilities",
+              "properties": {
+                "listChanged": {
+                  "type": "boolean",
+                  "description": "Whether the server supports tools/list notifications"
+                },
+                "async": {
+                  "type": "boolean",
+                  "description": "Whether the server supports async tool execution"
+                }
+              }
+            },
+            "resources": {
+              "type": "object",
+              "description": "Resource constraints"
+            }
+          }
+        },
+        "serverInfo": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Name of the server"
+            },
+            "version": {
+              "type": "string",
+              "description": "Version of the server"
+            }
+          }
+        }
+      }
+    },
+    "filesystem_list_directory_request": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to list"
+        }
+      }
+    },
+    "filesystem_list_directory_response": {
+      "type": "object",
+      "required": ["entries"],
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the entry"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["file", "directory"],
+                "description": "Type of the entry"
+              },
+              "size": {
+                "type": "integer",
+                "description": "Size of the file in bytes (only for files)"
+              },
+              "modifiedTime": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Last modified time"
+              }
+            }
+          }
+        }
+      }
+    },
+    "filesystem_read_file_request": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to read"
+        }
+      }
+    },
+    "filesystem_read_file_response": {
+      "type": "object",
+      "required": ["content"],
+      "properties": {
+        "content": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["text", "binary"],
+                "description": "Type of content"
+              },
+              "text": {
+                "type": "string",
+                "description": "Text content (only for text type)"
+              },
+              "base64": {
+                "type": "string",
+                "description": "Base64-encoded binary content (only for binary type)"
+              }
+            }
+          }
+        }
+      }
+    },
+    "filesystem_write_file_request": {
+      "type": "object",
+      "required": ["path", "content"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to write"
+        },
+        "content": {
+          "type": "string",
+          "description": "Content to write"
+        }
+      }
+    },
+    "filesystem_write_file_response": {
+      "type": "object",
+      "properties": {
+        "bytesWritten": {
+          "type": "integer",
+          "description": "Number of bytes written"
+        }
+      }
+    },
+    "tools_list_request": {
+      "type": "object",
+      "properties": {}
+    },
+    "tools_list_response": {
+      "type": "object",
+      "required": ["tools"],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "description"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the tool"
+              },
+              "description": {
+                "type": "string",
+                "description": "Description of the tool"
+              },
+              "parameters": {
+                "type": "object",
+                "description": "Parameters schema for the tool"
+              },
+              "returns": {
+                "type": "object",
+                "description": "Return value schema for the tool"
+              },
+              "supportsAsync": {
+                "type": "boolean",
+                "description": "Whether the tool supports async execution"
+              }
+            }
+          }
+        }
+      }
+    },
+    "tools_list_changed_notification": {
+      "type": "object",
+      "properties": {},
+      "description": "Notification sent when the list of available tools changes"
+    },
+    "tools_call_request": {
+      "type": "object",
+      "required": ["name", "arguments"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the tool to call"
+        },
+        "arguments": {
+          "type": "object",
+          "description": "Arguments to pass to the tool"
+        },
+        "async": {
+          "type": "boolean",
+          "description": "Whether to execute the tool asynchronously"
+        }
+      }
+    },
+    "tools_async_response": {
+      "type": "object",
+      "required": ["taskId"],
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "description": "ID of the async task"
+        }
+      }
+    },
+    "tools_get_task_request": {
+      "type": "object",
+      "required": ["taskId"],
+      "properties": {
+        "taskId": {
+          "type": "string",
+          "description": "ID of the task to get status for"
+        }
+      }
+    },
+    "tools_get_task_response": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["pending", "running", "completed", "failed"],
+          "description": "Status of the task"
+        },
+        "result": {
+          "description": "Result of the task (only present if status is completed)"
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "integer",
+              "description": "Error code"
+            },
+            "message": {
+              "type": "string",
+              "description": "Error message"
+            }
+          },
+          "required": ["code", "message"],
+          "description": "Error information (only present if status is failed)"
+        }
+      }
+    }
+  }
+} 

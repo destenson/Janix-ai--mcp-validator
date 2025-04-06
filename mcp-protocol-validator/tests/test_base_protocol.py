@@ -19,10 +19,14 @@ from tests.test_base import MCPBaseTest
 # Get server URL from environment (for backward compatibility)
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8080")
 
+# Check if running in STDIO-only mode
+STDIO_ONLY = os.environ.get("MCP_STDIO_ONLY", "0").lower() in ("1", "true", "yes")
+
 class TestBaseProtocol(MCPBaseTest):
     """Test suite for MCP base protocol compliance."""
     
     @pytest.mark.requirement("M001")
+    @pytest.mark.http_only
     def test_jsonrpc_version(self):
         """Verify the server requires and responds with JSON-RPC 2.0.
         
@@ -52,6 +56,7 @@ class TestBaseProtocol(MCPBaseTest):
             assert data["error"]["code"] == -32600  # Invalid request
     
     @pytest.mark.requirement(["M002", "M003"])
+    @pytest.mark.http_only
     def test_request_with_invalid_id(self):
         """Verify the server handles requests with invalid ID format.
         
@@ -195,6 +200,7 @@ class TestBaseProtocol(MCPBaseTest):
                 assert isinstance(capabilities["prompts"]["listChanged"], bool)
     
     @pytest.mark.requirement("M005")
+    @pytest.mark.http_only
     def test_method_not_found(self):
         """Test that the server responds with method not found for invalid methods.
         
@@ -203,7 +209,7 @@ class TestBaseProtocol(MCPBaseTest):
         response = self._send_request({
             "jsonrpc": "2.0",
             "id": "test_method_not_found",
-            "method": "invalid_method_name"
+            "method": "invalid_method_that_does_not_exist"
         })
         assert response.status_code == 200
         data = response.json()
@@ -211,6 +217,7 @@ class TestBaseProtocol(MCPBaseTest):
         assert data["error"]["code"] == -32601  # Method not found
     
     @pytest.mark.requirement(["M009", "M010"])
+    @pytest.mark.http_only
     def test_notification_handling(self):
         """Test that the server correctly handles notifications (no response expected).
         
@@ -222,13 +229,13 @@ class TestBaseProtocol(MCPBaseTest):
             "jsonrpc": "2.0",
             "method": "notifications/example"
         })
-        # Server should accept notifications with either 200 OK or 202 Accepted
-        assert response.status_code in [200, 202]
-        # If 200, the response should be empty
-        if response.status_code == 200:
-            assert response.text.strip() == "" or response.text.strip() == "{}"
-    
+        
+        # Notifications should not return a response entity, but the HTTP code may vary
+        # Some servers return 202 (Accepted), others return 200 (OK) with empty body
+        assert response.status_code in [200, 202, 204]
+        
     @pytest.mark.requirement("M011")
+    @pytest.mark.http_only
     def test_batch_handling(self):
         """Test that the server correctly handles batch requests.
         

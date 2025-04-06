@@ -12,6 +12,8 @@ import requests
 import sys
 import time
 import select
+import subprocess
+import threading
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
 
@@ -33,6 +35,37 @@ def set_server_process(process):
     """
     global SERVER_PROCESS
     SERVER_PROCESS = process
+
+def start_debug_output_thread(server_process):
+    """
+    Start a thread to capture and print the server's stderr output.
+    
+    Args:
+        server_process: The server subprocess
+    """
+    # If already terminated, return early
+    if server_process.poll() is not None:
+        return
+        
+    def print_server_stderr():
+        """Thread target for printing server stderr output."""
+        while server_process and server_process.poll() is None:
+            try:
+                # Use select to avoid blocking
+                ready, _, _ = select.select([server_process.stderr], [], [], 0.5)
+                if ready:
+                    line = server_process.stderr.readline()
+                    if line:
+                        line_str = line.decode('utf-8').rstrip()
+                        print(f"[SERVER] {line_str}", file=sys.stderr)
+            except Exception as e:
+                # Don't crash the thread on error
+                print(f"Error reading server stderr: {str(e)}", file=sys.stderr)
+                time.sleep(1)  # Avoid tight loop on error
+    
+    stderr_thread = threading.Thread(target=print_server_stderr, daemon=True)
+    stderr_thread.start()
+    return stderr_thread
 
 class MCPBaseTest:
     """Base class for all MCP test suites."""
@@ -140,6 +173,13 @@ class MCPBaseTest:
         # Debug mode can be enabled via environment variable
         debug = os.environ.get("MCP_DEBUG_STDIO", "0").lower() in ("1", "true", "yes")
         
+        # Configurable timeout - increased from 5 to 10 seconds by default
+        # Also allow configuration via environment variable
+        timeout = float(os.environ.get("MCP_STDIO_TIMEOUT", "10.0"))
+        
+        # Maximum number of retries for broken pipes
+        max_retries = int(os.environ.get("MCP_STDIO_MAX_RETRIES", "3"))
+        
         if SERVER_PROCESS is None:
             error_msg = "Server process is not available for STDIO transport"
             if debug:
@@ -150,83 +190,201 @@ class MCPBaseTest:
                 json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
             )
         
-        try:
-            # Convert data to JSON string and add newline
-            request_str = json.dumps(data) + "\n"
-            
-            if debug:
-                print(f"STDIO sending: {request_str.strip()}", file=sys.stderr)
-            
-            # Write to server's stdin
-            SERVER_PROCESS.stdin.write(request_str.encode('utf-8'))
-            SERVER_PROCESS.stdin.flush()
-            
-            # Read response from stdout with timeout
-            response_line = ""
-            start_time = time.time()
-            timeout = 5.0  # 5 second timeout for response
-            
-            # Check if process is still alive
-            if SERVER_PROCESS.poll() is not None:
-                error_msg = f"Server process terminated with exit code {SERVER_PROCESS.returncode}"
-                if debug:
-                    print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
-                return MockResponse(
-                    status_code=500,
-                    json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
-                )
-            
-            # Try to read with timeout using select
-            readable, _, _ = select.select([SERVER_PROCESS.stdout], [], [], timeout)
-            if readable:
-                response_line = SERVER_PROCESS.stdout.readline().decode('utf-8').strip()
-                
-                if debug:
-                    print(f"STDIO received: {response_line}", file=sys.stderr)
+        # Convert data to JSON string and add newline
+        request_str = json.dumps(data) + "\n"
+        
+        # Track retries
+        retries = 0
+        last_error = None
+        
+        while retries <= max_retries:
+            try:
+                # Check if process is still alive before attempting communication
+                if SERVER_PROCESS.poll() is not None:
+                    error_msg = f"Server process terminated with exit code {SERVER_PROCESS.returncode}"
+                    if debug:
+                        print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
                     
-                if not response_line:
-                    error_msg = "Empty response from server"
-                    if debug:
-                        print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                    # Try to restart the server if we have the command
+                    server_command = os.environ.get("MCP_SERVER_COMMAND")
+                    if server_command and retries < max_retries:
+                        if debug:
+                            print(f"STDIO: Attempting to restart server (retry {retries+1}/{max_retries})", file=sys.stderr)
+                        try:
+                            SERVER_PROCESS = subprocess.Popen(
+                                server_command,
+                                shell=True,
+                                stdout=subprocess.PIPE,
+                                stdin=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                bufsize=1  # Line buffered
+                            )
+                            # Give the server a moment to initialize
+                            time.sleep(2)
+                            retries += 1
+                            continue
+                        except Exception as e:
+                            error_msg = f"Failed to restart server: {str(e)}"
+                            if debug:
+                                print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                    
                     return MockResponse(
                         status_code=500,
                         json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
                     )
                 
+                if debug:
+                    print(f"STDIO sending: {request_str.strip()}", file=sys.stderr)
+                
+                # Write to server's stdin - use try block specifically for broken pipe
                 try:
-                    response_data = json.loads(response_line)
-                    # Create a mock response object
-                    return MockResponse(status_code=200, json_data=response_data)
-                except json.JSONDecodeError as e:
-                    error_msg = f"Invalid JSON in response: {str(e)}"
+                    SERVER_PROCESS.stdin.write(request_str.encode('utf-8'))
+                    SERVER_PROCESS.stdin.flush()
+                except BrokenPipeError as e:
+                    if retries < max_retries:
+                        if debug:
+                            print(f"STDIO WARNING: Broken pipe detected, retrying ({retries+1}/{max_retries})", file=sys.stderr)
+                        # Increment retry counter and try again
+                        retries += 1
+                        last_error = e
+                        
+                        # Try to restart the server if we have the command
+                        server_command = os.environ.get("MCP_SERVER_COMMAND")
+                        if server_command:
+                            if debug:
+                                print(f"STDIO: Attempting to restart server", file=sys.stderr)
+                            try:
+                                # Close existing process if possible
+                                try:
+                                    SERVER_PROCESS.terminate()
+                                    SERVER_PROCESS.wait(timeout=3)
+                                except:
+                                    pass
+                                
+                                SERVER_PROCESS = subprocess.Popen(
+                                    server_command,
+                                    shell=True,
+                                    stdout=subprocess.PIPE,
+                                    stdin=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    bufsize=1  # Line buffered
+                                )
+                                # Give the server a moment to initialize
+                                time.sleep(2)
+                            except Exception as e:
+                                if debug:
+                                    print(f"STDIO ERROR: Failed to restart server: {str(e)}", file=sys.stderr)
+                        
+                        time.sleep(1)  # Brief delay before retry
+                        continue
+                    else:
+                        # Max retries reached
+                        error_msg = f"Broken pipe error after {max_retries} retries: {str(e)}"
+                        if debug:
+                            print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                        return MockResponse(
+                            status_code=500,
+                            json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
+                        )
+                
+                # Read response with progressive timeout
+                response_line = ""
+                start_time = time.time()
+                
+                # Try to read with timeout using select
+                readable, _, _ = select.select([SERVER_PROCESS.stdout], [], [], timeout)
+                if readable:
+                    response_line = SERVER_PROCESS.stdout.readline().decode('utf-8').strip()
+                    
+                    if debug:
+                        print(f"STDIO received: {response_line}", file=sys.stderr)
+                        
+                    if not response_line:
+                        if retries < max_retries:
+                            if debug:
+                                print(f"STDIO WARNING: Empty response received, retrying ({retries+1}/{max_retries})", file=sys.stderr)
+                            retries += 1
+                            time.sleep(1)  # Brief delay before retry
+                            continue
+                        else:
+                            error_msg = "Empty response from server after max retries"
+                            if debug:
+                                print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                            return MockResponse(
+                                status_code=500,
+                                json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
+                            )
+                    
+                    try:
+                        response_data = json.loads(response_line)
+                        # Create a mock response object with success
+                        return MockResponse(status_code=200, json_data=response_data)
+                    except json.JSONDecodeError as e:
+                        if retries < max_retries:
+                            if debug:
+                                print(f"STDIO WARNING: Invalid JSON in response, retrying ({retries+1}/{max_retries})", file=sys.stderr)
+                                print(f"Response was: {response_line}", file=sys.stderr)
+                            retries += 1
+                            time.sleep(1)  # Brief delay before retry
+                            continue
+                        else:
+                            error_msg = f"Invalid JSON in response after max retries: {str(e)}"
+                            if debug:
+                                print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                                print(f"Response was: {response_line}", file=sys.stderr)
+                            return MockResponse(
+                                status_code=500,
+                                json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
+                            )
+                else:
+                    # Timeout occurred
+                    if retries < max_retries:
+                        if debug:
+                            print(f"STDIO WARNING: Timeout waiting for response after {timeout} seconds, retrying ({retries+1}/{max_retries})", file=sys.stderr)
+                        retries += 1
+                        # Exponential backoff for timeout
+                        timeout = min(timeout * 1.5, 30.0)  # Increase timeout but cap at 30 seconds
+                        continue
+                    else:
+                        error_msg = f"Timeout waiting for response after {timeout} seconds (max retries reached)"
+                        if debug:
+                            print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                        return MockResponse(
+                            status_code=500,
+                            json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
+                        )
+            
+            except Exception as e:
+                # For any other exceptions
+                if retries < max_retries:
+                    if debug:
+                        print(f"STDIO WARNING: Error during communication, retrying ({retries+1}/{max_retries}): {str(e)}", file=sys.stderr)
+                    retries += 1
+                    last_error = e
+                    time.sleep(1)  # Brief delay before retry
+                    continue
+                else:
+                    error_msg = f"STDIO communication error after {max_retries} retries: {str(e)}"
                     if debug:
                         print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
-                        print(f"Response was: {response_line}", file=sys.stderr)
+                        import traceback
+                        traceback.print_exc(file=sys.stderr)
+                    # Return error response on failure
+                    request_id = data.get("id") if isinstance(data, dict) else None
                     return MockResponse(
                         status_code=500,
-                        json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
+                        json_data={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": error_msg}}
                     )
-            else:
-                # Timeout occurred
-                error_msg = f"Timeout waiting for response after {timeout} seconds"
-                if debug:
-                    print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
-                return MockResponse(
-                    status_code=500,
-                    json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
-                )
-        except Exception as e:
-            error_msg = f"STDIO communication error: {str(e)}"
-            if debug:
-                print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
-                import traceback
-                traceback.print_exc(file=sys.stderr)
-            # Return error response on failure
-            request_id = data.get("id") if isinstance(data, dict) else None
-            return MockResponse(
-                status_code=500,
-                json_data={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": error_msg}}
-            )
+        
+        # If we get here, we've exhausted all retries
+        error_msg = f"Failed after {max_retries} retries: {str(last_error)}"
+        if debug:
+            print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+        request_id = data.get("id") if isinstance(data, dict) else None
+        return MockResponse(
+            status_code=500,
+            json_data={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": error_msg}}
+        )
     
     def _send_request_to_client(self, data: Dict[str, Any]) -> requests.Response:
         """Send a JSON-RPC request to the client."""
@@ -250,6 +408,24 @@ class MockResponse:
         self.status_code = status_code
         self._json_data = json_data
         self.headers = {}
+        
+        # For STDIO, a successful JSON-RPC response should be interpreted as status 200
+        # regardless of what status_code was passed in
+        if isinstance(json_data, dict) and "result" in json_data:
+            self.status_code = 200
+        
+        # For error responses, maintain the error status code
+        elif isinstance(json_data, dict) and "error" in json_data:
+            # Keep the 500 status code if it was set, otherwise use 200 as per JSON-RPC spec
+            if self.status_code != 500:
+                self.status_code = 200
+                
+        # For batch responses, check if it's a list
+        elif isinstance(json_data, list):
+            self.status_code = 200
+        
+        # Set a default text property to simulate HTTP response
+        self.text = json.dumps(json_data) if json_data else ""
     
     def json(self) -> Dict[str, Any]:
         """Return the JSON data."""

@@ -1,391 +1,341 @@
 # MCP Protocol Validator
 
-A comprehensive testing tool for validating Model Context Protocol (MCP) server and client implementations.
+A comprehensive testing tool for validating Model Context Protocol (MCP) server and client implementations across multiple protocol versions.
 
 ## Overview
 
-The MCP Protocol Validator is a containerized test suite designed to ensure compliance with the Model Context Protocol specification. It provides:
+The MCP Protocol Validator is a test suite designed to ensure compliance with the Model Context Protocol specification. It provides:
 
+- **Multi-Version Testing**: Support for testing against both 2024-11-05 and 2025-03-26 protocol specifications
 - **Comprehensive Tests**: Verifies all essential aspects of the MCP specification
-- **Isolated Testing**: Run both your server and the validator in a controlled Docker environment
-- **Detailed Reports**: Generate HTML or JSON reports for compliance analysis
-- **CI Integration**: GitHub Action for continuous validation
-- **Weighted Compliance Scoring**: Prioritizes critical requirements for accurate compliance assessment
-- **Multi-transport Support**: Test both HTTP and STDIO transport implementations
+- **Multiple Transport Mechanisms**: Test both HTTP and STDIO transport implementations
+- **Detailed Reports**: Generate HTML reports for easy compliance analysis
+- **Protocol Comparison**: Compare behavior across different protocol versions
+- **Docker Integration**: Run tests in a controlled Docker environment
 
-## Features
+## Protocol Version Support
 
-- **Base Protocol Tests**: Initialization, capabilities, JSON-RPC compliance
-- **Resources Tests**: List and read operations for resources
-- **Tools Tests**: Discovery and invocation of tools
-- **Prompts Tests**: Listing and retrieval of prompts
-- **Utilities Tests**: Ping, cancellation, progress, logging, and more
-- **Client Tests**: Roots and sampling features
+The following protocol versions are currently supported:
+
+| Version | Status | Description |
+|---------|--------|-------------|
+| 2025-03-26 | Supported | Extended with async support and environment variables |
+| 2024-11-05 | Supported | Initial MCP protocol version |
+
+You can specify which protocol version to test against using the `--protocol-version` flag:
+
+```bash
+# HTTP testing
+python mcp_validator.py --url http://localhost:8080 --protocol-version 2024-11-05
+
+# STDIO testing
+python stdio_docker_test.py --protocol-version 2025-03-26
+```
 
 ## Installation
 
-### Download Repository (Recommended)
+### Prerequisites
 
-```bash
-# Clone the repository
-git clone https://github.com/Janix-ai/mcp-protocol-validator.git
-cd mcp-protocol-validator
+- Python 3.8+ with pytest installed
+- Docker (for STDIO testing with the filesystem server)
+- Virtual environment (recommended)
 
-# Build the validator Docker image locally
-docker build --no-cache -t mcp-validator .
-```
+### Setup
 
-### Using Pre-built Docker Image
-
-```bash
-docker pull Janix-ai/mcp-protocol-validator:latest
-```
-
-### From Source
-
-```bash
-git clone https://github.com/Janix-ai/mcp-protocol-validator.git
-cd mcp-protocol-validator
-
-# Create a virtual environment with Python 3.11.8
-python3.11 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-## Usage
-
-### Isolated Testing (HTTP Transport)
-
-The reliable way to validate your HTTP-based MCP server implementation:
-
-```bash
-# 1. Create a Docker network for isolation
-docker network create mcp-test-network
-
-# 2. Run your MCP server implementation in Docker with the test network
-# Replace 'your-server-image:latest' with your actual MCP server Docker image
-docker run --rm --name mcp-server --network mcp-test-network \
-  -d your-server-image:latest
-
-# 3. Run the validator against your containerized MCP server
-docker run --rm --network mcp-test-network mcp-validator \
-  test \
-  --url http://mcp-server:your-port/mcp \
-  --report ./compliance-report.html \
-  --format html
-
-# 4. Clean up when done
-docker stop mcp-server
-docker network rm mcp-test-network
-```
-
-This approach:
-- Isolates both server and validator in a controlled environment
-- Prevents external network interference
-- Provides consistent testing results
-- Makes it easy to reset for clean testing
-
-### STDIO Transport Testing
-
-For testing MCP servers that implement the STDIO transport mechanism:
-
-```bash
-# 1. Create a Docker network for isolation
-docker network create mcp-test-network
-
-# 2. Test a STDIO-based server using the server-command parameter
-# The validator will launch your server and communicate via stdin/stdout
-docker run --rm --network mcp-test-network mcp-validator \
-  test \
-  --url http://localhost \
-  --server-command "your-server-launch-command" \
-  --report ./compliance-report.html \
-  --format html
-
-# 3. Clean up when done
-docker network rm mcp-test-network
-```
-
-> **Important Note**: Although we're testing via STDIO transport, the validator still requires the `--url` parameter with a valid URL format. Use `http://localhost` as a placeholder; it won't actually be used for communication. The `--server-command` parameter is what initiates STDIO-based testing.
-
-#### How STDIO Testing Works
-
-In this approach:
-- The validator launches your server as a subprocess using the `--server-command` parameter
-- Communication happens over stdin/stdout as per STDIO transport specification
-- The validator handles all the necessary plumbing for STDIO-based testing
-- Your server must read JSON-RPC messages from stdin and write responses to stdout
-
-#### Example: Testing a Filesystem MCP Server
-
-Here's a specific example for testing a filesystem-based MCP server with bound volumes:
-
-```bash
-docker run --rm --network mcp-test-network mcp-validator \
-  test \
-  --url http://localhost \
-  --server-command "docker run -i --rm --network mcp-test-network \
-    --mount type=bind,src=/Users/username/Desktop,dst=/projects/Desktop \
-    --mount type=bind,src=/path/to/other/allowed/dir,dst=/projects/other/allowed/dir,ro \
-    --mount type=bind,src=/path/to/file.txt,dst=/projects/path/to/file.txt \
-    mcp/filesystem /projects" \
-  --report ./compliance-report.html \
-  --format html \
-  --debug
-```
-
-> **Note**: The `-i` flag in the server command is essential as it keeps stdin open, which is required for STDIO transport.
-> The `--debug` flag helps show more detailed logs during testing, which is especially useful for troubleshooting.
-
-For the best results, follow these guidelines when testing a filesystem server:
-
-1. **Mount Relevant Directories**: Choose directories that contain a variety of file types to ensure comprehensive testing. Read-only mounts (`ro` flag) can be used for sensitive directories.
-
-2. **Running Outside Docker**: If you encounter "broken pipe" errors when testing in Docker, try running the validator directly:
-
+1. Clone the repository and create a virtual environment:
    ```bash
-   # Navigate to the validator directory
+   git clone https://github.com/your-org/mcp-protocol-validator.git
    cd mcp-protocol-validator
    
-   # Activate virtual environment if needed
-   source ../.venv/bin/activate  # Adjust path as needed
-   
-   # Run the validator with the same parameters
-   python mcp_validator.py test \
-     --url http://localhost \
-     --server-command "docker run -i --rm --network mcp-test-network \
-       --mount type=bind,src=/Users/username/Desktop,dst=/projects/Desktop \
-       mcp/filesystem /projects" \
-     --report ./compliance-report.html \
-     --format html \
-     --debug
+   # Create and activate virtual environment
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
 
-3. **Verifying Available Images**: Check which filesystem server images are available in your Docker environment:
-
+2. Install required packages:
    ```bash
-   docker images | grep filesystem
+   pip install -r requirements.txt
    ```
 
-   Choose the most appropriate image (e.g., `mcp/filesystem`, `janix-mcp-filesystem-server`, etc.)
+3. For STDIO testing with Docker, ensure:
+   - Docker is installed and running
+   - The `mcp/filesystem` image is built (or specify your own image)
+   - A Docker network will be created automatically by the test script
 
-4. **Common Issues and Solutions**:
-   - **Broken Pipe Errors**: Often caused by STDIO transport issues between the validator and filesystem server
-   - **Connection Refused**: Check network connectivity and ensure the server command is correctly formatted
-   - **Missing Capabilities**: Make sure you're using a compliant filesystem server implementation
+## Testing Options
 
-5. **Examining Results**: Even if the tests don't complete successfully, check the generated HTML report for partial results and insights on which tests were attempted.
+### 1. STDIO Docker Testing
 
-Replace the mount paths and target directories with your actual configuration.
-
-### Testing External Servers
-
-Test your MCP server implementation using Docker:
+For comprehensive validation of STDIO-based MCP server implementations:
 
 ```bash
-# Replace the URL with your actual MCP server endpoint
-docker run --rm mcp-validator \
-  test \
-  --url https://your-mcp-server.com/mcp \
-  --report ./reports/compliance-report.html \
-  --format html
+# Basic usage
+python stdio_docker_test.py
+
+# Advanced usage with all options
+python stdio_docker_test.py \
+  --protocol-version 2025-03-26 \
+  --docker-image mcp/filesystem \
+  --network-name mcp-test-network \
+  --mount-dir ./test_data/files \
+  --debug \
+  --timeout 15.0 \
+  --max-retries 5 \
+  --run-all-tests \
+  --report
 ```
 
-Test specific modules:
+#### Key Features
+
+- **Automatic Docker Network Setup**: Creates necessary Docker networks
+- **Test File Preparation**: Sets up test files including nested directories
+- **Protocol Version Testing**: Supports testing against different protocol versions
+- **HTML Reports**: Generates detailed test reports
+- **Server Information Capture**: Shows server logs and diagnostic information
+- **Comprehensive Error Handling**: Robust handling of timeouts and disconnections
+
+#### Command Line Options
+
+- `--protocol-version`, `-v`: Protocol version to test (2024-11-05 or 2025-03-26)
+- `--docker-image`: Docker image to use (default: mcp/filesystem)
+- `--network-name`: Docker network name (default: mcp-test-network)
+- `--mount-dir`, `-m`: Directory to mount in the Docker container
+- `--debug`, `-d`: Enable detailed debug output
+- `--timeout`, `-t`: Timeout for STDIO responses in seconds (default: 10.0)
+- `--max-retries`, `-r`: Maximum retries for broken pipes (default: 3)
+- `--run-all-tests`, `-a`: Run all compatible tests, not just the base protocol tests
+- `--report`: Generate HTML test report
+- `--report-dir`: Directory to store HTML test reports (default: reports/)
+
+#### What the Script Does
+
+The enhanced script:
+- Creates a Docker network if it doesn't exist
+- Prepares test files including nested directories and various file types
+- Launches the Docker filesystem server with environment variables
+- Configures the environment for STDIO transport
+- Runs the appropriate tests based on the options provided
+- Generates HTML reports if requested
+- Handles server cleanup
+
+### 2. Protocol Version Comparison
+
+To compare how your server implementation behaves with different protocol versions, you can use the `compare_protocol_versions.py` script:
 
 ```bash
-# Replace the URL with your actual MCP server endpoint
-docker run --rm mcp-validator \
-  test \
-  --url https://your-mcp-server.com/mcp \
-  --test-modules base,resources,tools \
-  --report ./reports/compliance-report.html \
-  --format html
+python compare_protocol_versions.py
 ```
 
-### Local Development
+This will:
+- Test your server against both supported protocol versions (2024-11-05 and 2025-03-26)
+- Report on test results, negotiated versions, and capabilities
+- Show detailed server information and diagnostics
+- Provide recommendations on compatibility
+
+The comparison report includes:
+- Test results for each protocol version (passed/failed/skipped tests)
+- Negotiated protocol versions
+- Available tools
+- Server capabilities
+- Server information from logs
+
+Example output:
+```
+================================================================================
+PROTOCOL VERSION COMPARISON
+================================================================================
+
+Protocol Version 1 (2024-11-05):
+  Status: Pass
+  Tests: 3 passed, 0 failed, 0 skipped
+  Negotiated Version: 2024-11-05
+  Server Capabilities: Not reported
+  Available Tools: filesystem/read_file, filesystem/write_file, filesystem/list_directory
+  Server Information:
+    [SERVER] Secure MCP Filesystem Server running on stdio
+    [SERVER] Allowed directories: [ '/projects' ]
+
+Protocol Version 2 (2025-03-26):
+  Status: Pass
+  Tests: 3 passed, 0 failed, 0 skipped
+  Negotiated Version: 2025-03-26
+  Server Capabilities: Not reported
+  Available Tools: filesystem/read_file, filesystem/write_file, filesystem/list_directory
+  Server Information:
+    [SERVER] Secure MCP Filesystem Server running on stdio
+    [SERVER] Allowed directories: [ '/projects' ]
+
+Recommendation:
+  Server implementation works well with both protocol versions.
+================================================================================
+```
+
+This is particularly useful when:
+- Upgrading your server to support a newer protocol version
+- Ensuring backward compatibility
+- Diagnosing protocol-specific issues
+
+### 3. HTTP Transport Testing
+
+For servers that implement the HTTP transport:
 
 ```bash
-# Test a local server (ensure you're using Python 3.11.8)
-cd mcp-protocol-validator
-python mcp_validator.py test \
-  --url http://localhost:8080 \
-  --report ./compliance-report.html \
-  --format html
+# Set environment variables
+export MCP_SERVER_URL="http://localhost:8080"
+export MCP_TRANSPORT_TYPE="http"
+export MCP_PROTOCOL_VERSION="2024-11-05"  # Optional: specify protocol version
+
+# Run tests
+pytest -v tests/
 ```
 
-### GitHub Actions Integration
+### 4. Custom STDIO Testing
 
-Add the following to your workflow file:
-
-```yaml
-- name: Set up Python 3.11.8
-  uses: actions/setup-python@v2
-  with:
-    python-version: 3.11.8
-
-- name: Run MCP Compliance Tests
-  uses: Janix-ai/mcp-protocol-validator-action@v1
-  with:
-    server-url: http://localhost:8080
-    test-modules: base,resources,tools,prompts,utilities
-```
-
-## Testing Clients
-
-To test MCP clients:
+For testing other STDIO servers (not using the Docker test script):
 
 ```bash
-# Set environment variables for client testing
-export MCP_CLIENT_URL=http://localhost:8766
-export MOCK_MCP_SERVER=1
+# Set environment variables
+export MCP_TRANSPORT_TYPE="stdio"
+export MCP_DEBUG_STDIO="1"
+export MCP_PROTOCOL_VERSION="2025-03-26"  # Or specify a different version
 
-# Run client tests
-cd mcp-protocol-validator
-python -m pytest tests/test_roots.py tests/test_sampling.py -v
+# Launch your server and capture its process
+SERVER_PROCESS=$(your_server_command)
+
+# Import the testing framework and run tests
+python -c "from tests.test_base import set_server_process; set_server_process($SERVER_PROCESS)"
+pytest -v -m "not http_only" tests/
 ```
 
-## Compliance Scoring System
+## Test Report Generation
 
-The validator uses a weighted scoring system to accurately reflect the importance of different requirements:
+You can generate HTML test reports for better visualization of test results:
 
-| Requirement Level | Weight | Impact | Severity |
-|-------------------|--------|--------|----------|
-| MUST (M-prefixed) | 10 | 80% | 🔴 Critical |
-| SHOULD (S-prefixed) | 3 | 15% | 🟠 Medium |
-| MAY (A-prefixed) | 1 | 5% | 🟢 Low |
+```bash
+# Generate HTML report with pytest directly
+pytest -v tests/ --html=reports/test-report.html --self-contained-html
 
-This weighting ensures that failing critical requirements has a significantly larger impact on the compliance score than failing optional ones. The overall compliance score is calculated using:
-
-```
-ComplianceScore = (10*MustPassed + 3*ShouldPassed + 1*MayPassed) / (10*TotalMust + 3*TotalShould + 1*TotalMay) * 100
+# Or use the STDIO test script with report option
+python stdio_docker_test.py --protocol-version 2025-03-26 --report
 ```
 
-Based on the calculated score, implementations are classified into one of these compliance levels:
+Reports include:
+- Summary of passed, failed, and skipped tests
+- Details of each test case
+- Environment information
+- Test logs and error messages
 
-- **Fully Compliant** (100%): Passes all MUST requirements
-- **Substantially Compliant** (90-99%): Passes most MUST requirements with minor issues
-- **Partially Compliant** (75-89%): Has significant compliance issues
-- **Minimally Compliant** (50-74%): Major interoperability concerns
-- **Non-Compliant** (<50%): Unlikely to be interoperable
+## Testing Different Capabilities
 
-For more details, see [Compliance Scoring](docs/compliance-scoring.md).
+When testing servers that support different capability sets:
+
+1. **Basic Filesystem Capabilities**:
+   - Default test suite is designed for servers implementing filesystem tools
+
+2. **Custom Capabilities**:
+   - For servers with specialized capabilities, you might need to modify the initialization request in `test_base_protocol.py` to match the expected capabilities
+
+3. **Server-Specific Tests**:
+   - You can create specialized test files for specific server implementations
+
+## Schema Validation
+
+The validator includes JSON schema files for validating MCP protocol messages:
+
+- `schema/mcp_schema_2024-11-05.json`: Schema for the original protocol version
+- `schema/mcp_schema_2025-03-26.json`: Schema for the newer protocol version with async support
+
+These schemas are used by the test suite to validate the structure of request and response messages.
 
 ## Troubleshooting
 
-### Transport Compatibility
+### Common Issues
 
-The MCP Protocol Validator is designed to work with servers implementing either transport mechanism:
+- **Connection errors**: Verify the server is running and accessible
+- **Import errors**: Make sure you're running from the project root
+- **STDIO issues**: Enable debug mode with `--debug` or `MCP_DEBUG_STDIO=1`  
+- **Docker errors**: Check permissions for mounted directories and Docker installation
+- **Protocol version errors**: Ensure your server supports the protocol version you're testing against
+- **Network issues**: Verify Docker network exists or let the script create it
 
-- **HTTP Transport**: The default testing mode, activated by providing the `--url` parameter without a `--server-command`.
-- **STDIO Transport**: Activated by providing both `--url` and `--server-command` parameters. The validator will spawn your server as a subprocess and communicate via stdin/stdout.
+### Docker Setup Issues
 
-If you're having issues:
+When using the Docker testing approach:
 
-1. **Check for MCP Server Environment Variable**: Make sure `MCP_SERVER_URL` is properly set when using the validator. For STDIO testing, you might need to use:
+1. **Docker Network**: If the script fails to create a Docker network, you can create it manually:
    ```bash
-   export MCP_SERVER_URL=http://localhost
+   docker network create mcp-test-network
    ```
 
-2. **Examine the Generated Report**: Even if tests fail with connection errors, the HTML report might still contain useful information about which tests were attempted.
+2. **Mount Permissions**: If you encounter permission issues with mounted directories:
+   - Verify that the specified directories exist
+   - Check that you have read/write permissions to those directories
+   - For Linux/macOS, you might need to adjust the permissions with `chmod`
 
-3. **Alternate Approach**: You might need to run the validator directly (not in Docker) for STDIO testing:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   python mcp_validator.py test --url http://localhost --server-command "your-server-command"
-   ```
+3. **Docker Image**: If the Docker image is not found:
+   - Build the image using: `docker build -t mcp/filesystem .`
+   - Or specify a different image with the `--docker-image` option
 
-4. **Debug Transport Issues**: If you're experiencing connection problems, try:
-   - For HTTP: Check the server logs and ensure the server is accepting connections on the specified URL
-   - For STDIO: Add debugging output to stderr in your server to diagnose communication issues
+### STDIO Transport Issues
 
-5. **Test Order**: We recommend testing with HTTP transport first if your server supports it, as it's easier to debug and provides clearer error messages. Once HTTP transport is working, you can test STDIO transport.
+When testing STDIO transport:
 
-We're working to improve STDIO transport testing in future releases.
+1. **Broken Pipe Errors**: If you see "broken pipe" errors:
+   - Try increasing the `--timeout` value
+   - Increase the `--max-retries` count
+   - Check if your server is properly handling stdin/stdout
 
-### Filesystem Server Specific Issues
+2. **No Response**: If the server doesn't respond:
+   - Enable debug mode with `--debug`
+   - Check the server logs for errors
+   - Verify that the server is correctly implementing the STDIO transport protocol
 
-When testing a filesystem-based MCP server, you might encounter the following specific issues:
+3. **Process Management**: If the server process is not properly terminated:
+   - The script will attempt to force kill the process
+   - Check for any orphaned processes with `ps aux | grep your-server-name`
 
-1. **Broken Pipe Errors**: These typically occur when the STDIO communication between the validator and the filesystem server is interrupted.
-   - Solution: Run the validator outside of Docker to reduce communication layers
-   - Alternative: Try using a different filesystem server image (e.g., `janix-mcp-filesystem-server` instead of `mcp/filesystem`)
-   - Check: Ensure your Docker network configuration is correct
+## Advanced Configuration Environment Variables
 
-2. **Permission Issues**: The filesystem server may fail to access mounted directories.
-   - Solution: Verify the mount paths are correct and the user has permissions to access those directories
-   - Alternative: Try with fewer, simpler mounts first to isolate the issue
+- `MCP_PROTOCOL_VERSION`: Set the protocol version to test against
+- `MCP_DEBUG_STDIO`: Enable verbose STDIO debug output (0/1)
+- `MCP_STDIO_TIMEOUT`: Set timeout for STDIO responses in seconds
+- `MCP_STDIO_MAX_RETRIES`: Set maximum retries for broken pipes
+- `MCP_DOCKER_IMAGE`: Docker image to use for testing
+- `MCP_NETWORK_NAME`: Docker network name to use
 
-3. **Missing Response from Server**: If the server isn't responding to initialization requests:
-   - Check: View the stderr output using the `--debug` flag
-   - Solution: Ensure the server supports the MCP protocol version specified
-   - Alternative: Try a different transport mechanism if your server supports it
+## Features Tested
 
-4. **Testing on Different Platforms**:
-   - MacOS/Linux: Use the paths as shown in the examples above
-   - Windows: Adjust the mount paths using proper Windows path syntax
-   ```bash
-   --mount type=bind,src=C:\Users\username\Documents,dst=/projects/Documents
-   ```
+The MCP Protocol Validator tests the following key aspects of the MCP specification:
 
-5. **Docker Socket Permissions**: On some systems, you might need to pass the Docker socket to enable nested Docker calls:
-   ```bash
-   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock
-   ```
+1. **Protocol Initialization**:
+   - Protocol version negotiation
+   - Capabilities exchange
+   - Client/server information
 
-For further troubleshooting, examine the logs from both the validator and the filesystem server for specific error messages.
+2. **Tools**:
+   - Tool discovery (tools/list)
+   - Tool invocation (tools/call)
+   - Parameter validation
+   - Error handling
 
-## Reports
+3. **Filesystem Operations** (for filesystem servers):
+   - Directory listing
+   - File reading
+   - File writing
+   - Path validation
 
-Reports are generated in the format specified by the `--format` option:
+4. **JSON-RPC Compliance**:
+   - Message structure
+   - Error responses
+   - Method handling
 
-- **HTML**: Interactive report with detailed test results
-- **Markdown**: Simple text-based report
-- **JSON**: Structured data for programmatic analysis
+5. **Environment Variables** (for 2025-03-26):
+   - Environment variable support
+   - Resource constraints
 
-Each report includes:
-- Overall compliance score and level
-- Breakdown by requirement type (MUST, SHOULD, MAY)
-- Section-by-section compliance details
-- Failed tests categorized by severity
-- Prioritized remediation plan
-- Performance metrics (where available)
-
-See a [sample report](docs/updated-sample-report.md) for an example.
-
-## Development
-
-### Requirements
-- Python 3.11.8
-- Docker (for containerized testing)
-
-### Building the Docker Image
-
-```bash
-cd mcp-protocol-validator
-docker build --no-cache -t mcp-validator .
-```
-
-### Running Internal Tests
-
-```bash
-cd mcp-protocol-validator
-# Ensure you're using Python 3.11.8
-python -m pytest
-```
-
-## Specification Compliance
-
-The test suite is based on the Model Context Protocol specification version 2025-03-26 and covers:
-
-- **MUST** requirements: Essential for compliance (89 requirements)
-- **SHOULD** requirements: Recommended practices (30 requirements)
-- **MAY** requirements: Optional features (26 requirements)
+6. **Asynchronous Execution** (for 2025-03-26):
+   - Async tool support
+   - Task status tracking
 
 ## License
 
@@ -394,38 +344,3 @@ The test suite is based on the Model Context Protocol specification version 2025
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Troubleshooting
-
-### STDIO Transport Issues
-
-When testing STDIO-based servers, you might encounter errors like:
-
-```
-requests.exceptions.MissingSchema: Invalid URL 'http://localhost': No scheme supplied. Perhaps you meant https://http://localhost?
-```
-
-or
-
-```
-requests.exceptions.ConnectionError: Connection refused
-```
-
-These errors occur because parts of the validator may still attempt to use HTTP requests even when STDIO transport is intended. Some potential workarounds:
-
-1. **Check for MCP Server Environment Variable**: Make sure `MCP_SERVER_URL` is properly set when using the validator. For STDIO testing, you might need to use:
-   ```bash
-   export MCP_SERVER_URL=http://localhost
-   ```
-
-2. **Examine the Generated Report**: Even if tests fail with connection errors, the HTML report might still contain useful information about which tests were attempted.
-
-3. **Alternate Approach**: You might need to run the validator directly (not in Docker) for STDIO testing:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   python mcp_validator.py test --url http://localhost --server-command "your-server-command"
-   ```
-
-We're working to improve STDIO transport testing in future releases.

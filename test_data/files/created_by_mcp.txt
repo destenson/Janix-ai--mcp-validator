@@ -1,0 +1,1 @@
+This file was created by the MCP stdio client test!

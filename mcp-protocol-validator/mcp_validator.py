@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress
 import threading
+import signal
 
 # Initialize rich console for better output
 console = Console()
@@ -30,7 +31,7 @@ SERVER_PROCESS = None
 @click.group()
 @click.version_option(version="0.1.0")
 def cli():
-    """MCP Protocol Validator - Test your MCP server implementation."""
+    """Command-line interface for the MCP Protocol Validator."""
     pass
 
 @cli.command()
@@ -41,7 +42,8 @@ def cli():
 @click.option("--test-modules", help="Comma-separated list of test modules to run (base,resources,tools,prompts,utilities)")
 @click.option("--version", default="2025-03-26", type=click.Choice(["2024-11-05", "2025-03-26"]), help="MCP protocol version to test against")
 @click.option("--debug", is_flag=True, help="Enable debug output, especially for STDIO transport")
-def test(url, server_command, report, format, test_modules, version, debug):
+@click.option("--stdio-only", is_flag=True, help="Run only STDIO-compatible tests (avoid HTTP-specific tests)")
+def test(url, server_command, report, format, test_modules, version, debug, stdio_only):
     """Run protocol compliance tests against an MCP server."""
     global SERVER_PROCESS
     
@@ -60,34 +62,50 @@ def test(url, server_command, report, format, test_modules, version, debug):
     server_process = None
     if server_command:
         console.print(f"Starting local server: {server_command}")
-        server_process = subprocess.Popen(
-            server_command, 
-            shell=True, 
-            stdout=subprocess.PIPE, 
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=1  # Line buffered
-        )
-        # Wait for server to start
-        console.print("Waiting for server to start...")
-        time.sleep(2)  # Give the server a moment to initialize
-        # Store process in global variable for STDIO transport
-        SERVER_PROCESS = server_process
+        server_process = run_server_command(server_command, debug=debug)
         
-        # If in debug mode, start a thread to print server stderr output
-        if debug:
-            def print_server_stderr():
-                while server_process and server_process.poll() is None:
-                    line = server_process.stderr.readline()
-                    if line:
-                        console.print(f"[dim][SERVER][/dim] {line.decode('utf-8').rstrip()}")
-            
-            stderr_thread = threading.Thread(target=print_server_stderr, daemon=True)
-            stderr_thread.start()
+        if not server_process:
+            console.print("Failed to start server process. Exiting.")
+            return 1
+        
+        # Register cleanup handler for proper server shutdown
+        import atexit
+        
+        def cleanup_server():
+            if SERVER_PROCESS is not None:
+                console.print("Stopping local server...")
+                try:
+                    # Try to gracefully terminate the process
+                    SERVER_PROCESS.terminate()
+                    
+                    # Give it a moment to shut down
+                    for _ in range(3):
+                        if SERVER_PROCESS.poll() is not None:
+                            break
+                        time.sleep(1)
+                        
+                    # Force kill if still running
+                    if SERVER_PROCESS.poll() is None:
+                        if debug:
+                            console.print("Force killing server process", file=sys.stderr)
+                        if os.name == 'nt':  # Windows
+                            SERVER_PROCESS.kill()
+                        else:  # Unix/Linux/Mac
+                            os.killpg(os.getpgid(SERVER_PROCESS.pid), signal.SIGKILL)
+                except Exception as e:
+                    if debug:
+                        console.print(f"Error during server cleanup: {str(e)}", file=sys.stderr)
+        
+        atexit.register(cleanup_server)
     
     try:
         # Set up environment variables for tests
         os.environ["MCP_SERVER_URL"] = url
+        
+        # Set STDIO-only mode if specified
+        if stdio_only:
+            os.environ["MCP_STDIO_ONLY"] = "1"
+            console.print("[bold blue]Running STDIO-compatible tests only[/bold blue]")
         
         # Determine transport type and configure environment
         if server_command:
@@ -117,6 +135,12 @@ def test(url, server_command, report, format, test_modules, version, debug):
         # Add report format
         if format == "html":
             pytest_args.extend(["--html", report, "--self-contained-html"])
+        
+        # Run only STDIO-compatible tests if specified
+        if stdio_only:
+            # Create a custom marker expression to include only STDIO-compatible tests
+            # This will skip any tests that use HTTP-specific methods
+            pytest_args.extend(["-k", "not http_only"])
         
         # Filter test modules if specified
         if test_modules:
@@ -161,10 +185,6 @@ def test(url, server_command, report, format, test_modules, version, debug):
         if server_process:
             console.print("Stopping local server...")
             server_process.terminate()
-            try:
-                server_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                server_process.kill()
         # Clear global reference
         SERVER_PROCESS = None
 
@@ -181,6 +201,110 @@ def schema(version):
     else:
         console.print(f"[bold red]Schema file for version {version} not found![/bold red]")
         return 1
+
+def run_server_command(server_command, debug=False):
+    """
+    Run a server command and set up global server process for testing.
+    
+    Args:
+        server_command: The command to start the server
+        debug: Whether to enable debug mode
+    
+    Returns:
+        The server process
+    """
+    from tests.test_base import SERVER_PROCESS, start_debug_output_thread
+    import subprocess
+    import time
+    import os
+    import signal
+    
+    # Store the server command in environment for potential restarts
+    os.environ["MCP_SERVER_COMMAND"] = server_command
+    
+    # Kill any existing process
+    if SERVER_PROCESS is not None:
+        try:
+            # Try graceful termination first
+            SERVER_PROCESS.terminate()
+            
+            # Give it a moment to shut down
+            for _ in range(3):
+                if SERVER_PROCESS.poll() is not None:
+                    break
+                time.sleep(1)
+                
+            # Force kill if still running
+            if SERVER_PROCESS.poll() is None:
+                if debug:
+                    print(f"Force killing previous server process", file=sys.stderr)
+                if os.name == 'nt':  # Windows
+                    SERVER_PROCESS.kill()
+                else:  # Unix/Linux/Mac
+                    os.killpg(os.getpgid(SERVER_PROCESS.pid), signal.SIGKILL)
+        except Exception as e:
+            if debug:
+                print(f"Error stopping previous server process: {str(e)}", file=sys.stderr)
+    
+    if debug:
+        print(f"Starting server with command: {server_command}", file=sys.stderr)
+    
+    # Start the server process
+    try:
+        # For Docker commands, ensure we're using the right parameters
+        if 'docker' in server_command and ' -i ' not in server_command and not server_command.startswith("docker run -i"):
+            if debug:
+                print("Adding -i flag to Docker command to support STDIO", file=sys.stderr)
+            # Insert -i flag if not present for Docker commands
+            parts = server_command.split("docker run ")
+            if len(parts) > 1:
+                server_command = f"{parts[0]}docker run -i {parts[1]}"
+    
+        # Start the server as a new process group to allow killing the entire group
+        kwargs = {
+            'shell': True,
+            'stdout': subprocess.PIPE,
+            'stdin': subprocess.PIPE,
+            'stderr': subprocess.PIPE,
+            'bufsize': 1,  # Line buffered
+        }
+        
+        # On non-Windows platforms, create a new process group
+        if os.name != 'nt':  # Unix/Linux/Mac
+            kwargs['preexec_fn'] = os.setsid
+            
+        SERVER_PROCESS = subprocess.Popen(server_command, **kwargs)
+        
+        # Give the server a moment to initialize
+        time.sleep(2)
+        
+        # Check if the process started successfully
+        if SERVER_PROCESS.poll() is not None:
+            print(f"Server process failed to start (exit code: {SERVER_PROCESS.returncode})", file=sys.stderr)
+            # Try to capture stderr output to see what went wrong
+            stderr_output = SERVER_PROCESS.stderr.read().decode('utf-8')
+            print(f"Server stderr output: {stderr_output}", file=sys.stderr)
+            return None
+            
+        # Start debug output thread if in debug mode
+        if debug:
+            start_debug_output_thread(SERVER_PROCESS)
+            
+        return SERVER_PROCESS
+        
+    except Exception as e:
+        print(f"Failed to start server: {str(e)}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return None
+
+def main():
+    """Main entry point for the MCP Protocol Validator."""
+    # Import SERVER_PROCESS at the beginning to avoid linting issues
+    from tests.test_base import SERVER_PROCESS as _SERVER_PROCESS
+    
+    # Run the CLI
+    return cli()
 
 if __name__ == "__main__":
     cli() 
