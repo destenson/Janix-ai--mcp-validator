@@ -166,7 +166,7 @@ The test suite is based on the Model Context Protocol specification version 2025
 
 ## License
 
-[MIT License](LICENSE)
+[GNU AFFERO GENERAL PUBLIC LICENSE](LICENSE)
 
 ## Contributing
 
