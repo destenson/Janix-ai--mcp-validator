@@ -133,10 +133,51 @@ docker run --rm --network mcp-test-network mcp-validator \
     --mount type=bind,src=/path/to/file.txt,dst=/projects/path/to/file.txt \
     mcp/filesystem /projects" \
   --report ./compliance-report.html \
-  --format html
+  --format html \
+  --debug
 ```
 
 > **Note**: The `-i` flag in the server command is essential as it keeps stdin open, which is required for STDIO transport.
+> The `--debug` flag helps show more detailed logs during testing, which is especially useful for troubleshooting.
+
+For the best results, follow these guidelines when testing a filesystem server:
+
+1. **Mount Relevant Directories**: Choose directories that contain a variety of file types to ensure comprehensive testing. Read-only mounts (`ro` flag) can be used for sensitive directories.
+
+2. **Running Outside Docker**: If you encounter "broken pipe" errors when testing in Docker, try running the validator directly:
+
+   ```bash
+   # Navigate to the validator directory
+   cd mcp-protocol-validator
+   
+   # Activate virtual environment if needed
+   source ../.venv/bin/activate  # Adjust path as needed
+   
+   # Run the validator with the same parameters
+   python mcp_validator.py test \
+     --url http://localhost \
+     --server-command "docker run -i --rm --network mcp-test-network \
+       --mount type=bind,src=/Users/username/Desktop,dst=/projects/Desktop \
+       mcp/filesystem /projects" \
+     --report ./compliance-report.html \
+     --format html \
+     --debug
+   ```
+
+3. **Verifying Available Images**: Check which filesystem server images are available in your Docker environment:
+
+   ```bash
+   docker images | grep filesystem
+   ```
+
+   Choose the most appropriate image (e.g., `mcp/filesystem`, `janix-mcp-filesystem-server`, etc.)
+
+4. **Common Issues and Solutions**:
+   - **Broken Pipe Errors**: Often caused by STDIO transport issues between the validator and filesystem server
+   - **Connection Refused**: Check network connectivity and ensure the server command is correctly formatted
+   - **Missing Capabilities**: Make sure you're using a compliant filesystem server implementation
+
+5. **Examining Results**: Even if the tests don't complete successfully, check the generated HTML report for partial results and insights on which tests were attempted.
 
 Replace the mount paths and target directories with your actual configuration.
 
@@ -266,6 +307,38 @@ If you're having issues:
 5. **Test Order**: We recommend testing with HTTP transport first if your server supports it, as it's easier to debug and provides clearer error messages. Once HTTP transport is working, you can test STDIO transport.
 
 We're working to improve STDIO transport testing in future releases.
+
+### Filesystem Server Specific Issues
+
+When testing a filesystem-based MCP server, you might encounter the following specific issues:
+
+1. **Broken Pipe Errors**: These typically occur when the STDIO communication between the validator and the filesystem server is interrupted.
+   - Solution: Run the validator outside of Docker to reduce communication layers
+   - Alternative: Try using a different filesystem server image (e.g., `janix-mcp-filesystem-server` instead of `mcp/filesystem`)
+   - Check: Ensure your Docker network configuration is correct
+
+2. **Permission Issues**: The filesystem server may fail to access mounted directories.
+   - Solution: Verify the mount paths are correct and the user has permissions to access those directories
+   - Alternative: Try with fewer, simpler mounts first to isolate the issue
+
+3. **Missing Response from Server**: If the server isn't responding to initialization requests:
+   - Check: View the stderr output using the `--debug` flag
+   - Solution: Ensure the server supports the MCP protocol version specified
+   - Alternative: Try a different transport mechanism if your server supports it
+
+4. **Testing on Different Platforms**:
+   - MacOS/Linux: Use the paths as shown in the examples above
+   - Windows: Adjust the mount paths using proper Windows path syntax
+   ```bash
+   --mount type=bind,src=C:\Users\username\Documents,dst=/projects/Documents
+   ```
+
+5. **Docker Socket Permissions**: On some systems, you might need to pass the Docker socket to enable nested Docker calls:
+   ```bash
+   --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock
+   ```
+
+For further troubleshooting, examine the logs from both the validator and the filesystem server for specific error messages.
 
 ## Reports
 
