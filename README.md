@@ -27,17 +27,31 @@ The MCP Protocol Validator is a containerized test suite designed to ensure comp
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/mcp-protocol-validator.git
+git clone https://github.com/Janix-ai/mcp-protocol-validator.git
 cd mcp-protocol-validator
 
 # Build the validator Docker image locally
-docker build -t mcp-validator ./mcp-protocol-validator
+docker build -t mcp-validator .
 ```
 
 ### Using Pre-built Docker Image
 
 ```bash
-docker pull yourorg/mcp-protocol-validator:latest
+docker pull Janix-ai/mcp-protocol-validator:latest
+```
+
+### From Source
+
+```bash
+git clone https://github.com/Janix-ai/mcp-protocol-validator.git
+cd mcp-protocol-validator
+
+# Create a virtual environment with Python 3.11.8
+python3.11 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ## Usage
@@ -57,7 +71,8 @@ docker run --rm --name mcp-server --network mcp-test-network \
 # 3. Run validator tests against your containerized server
 docker run --rm --network mcp-test-network mcp-validator \
   --url http://mcp-server:your-port/mcp \
-  --report ./compliance-report.html
+  --report ./compliance-report.html \
+  --format html
 
 # 4. Clean up when done
 docker stop mcp-server
@@ -77,7 +92,8 @@ Test an MCP server using Docker:
 ```bash
 docker run --rm mcp-validator \
   --url https://your-mcp-server.com/mcp \
-  --report ./reports/compliance-report.html
+  --report ./reports/compliance-report.html \
+  --format html
 ```
 
 Test specific modules:
@@ -86,17 +102,19 @@ Test specific modules:
 docker run --rm mcp-validator \
   --url https://your-mcp-server.com/mcp \
   --test-modules base,resources,tools \
-  --report ./reports/compliance-report.html
+  --report ./reports/compliance-report.html \
+  --format html
 ```
 
 ### Local Development
 
 ```bash
-# Test a local server
+# Test a local server (ensure you're using Python 3.11.8)
 cd mcp-protocol-validator
 python mcp_validator.py test \
   --url http://localhost:8080 \
-  --report ./compliance-report.html
+  --report ./compliance-report.html \
+  --format html
 ```
 
 ### GitHub Actions Integration
@@ -104,8 +122,13 @@ python mcp_validator.py test \
 Add the following to your workflow file:
 
 ```yaml
+- name: Set up Python 3.11.8
+  uses: actions/setup-python@v2
+  with:
+    python-version: 3.11.8
+
 - name: Run MCP Compliance Tests
-  uses: yourorg/mcp-protocol-validator-action@v1
+  uses: Janix-ai/mcp-protocol-validator-action@v1
   with:
     server-url: http://localhost:8080
     test-modules: base,resources,tools,prompts,utilities
@@ -171,6 +194,10 @@ See a [sample report](docs/updated-sample-report.md) for an example.
 
 ## Development
 
+### Requirements
+- Python 3.11.8
+- Docker (for containerized testing)
+
 ### Building the Docker Image
 
 ```bash
@@ -182,6 +209,7 @@ docker build -t mcp-validator .
 
 ```bash
 cd mcp-protocol-validator
+# Ensure you're using Python 3.11.8
 python -m pytest
 ```
 
@@ -199,4 +227,4 @@ The test suite is based on the Model Context Protocol specification version 2025
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. 
+Contributions are welcome! Please feel free to submit a Pull Request.
