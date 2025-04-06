@@ -14,12 +14,17 @@ import json
 import pytest
 import requests
 from jsonschema import validate
+from tests.test_base import MCPBaseTest
 
-# Get server URL from environment
+# Get server URL from environment (for backward compatibility)
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8080")
 
-class TestBaseProtocol:
+class TestBaseProtocol(MCPBaseTest):
     """Test suite for MCP base protocol compliance."""
+    
+    def __init__(self):
+        """Initialize the base test class."""
+        super().__init__()
     
     @pytest.mark.requirement("M001")
     def test_jsonrpc_version(self):
@@ -253,10 +258,4 @@ class TestBaseProtocol:
         assert data[0]["id"] == "batch_1"
         assert data[1]["id"] == "batch_2"
     
-    def _send_request(self, payload):
-        """Send a JSON-RPC request to the server."""
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-        return requests.post(MCP_SERVER_URL, json=payload, headers=headers) 
+    # Remove the _send_request method since it's now provided by the parent class 

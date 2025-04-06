@@ -13,12 +13,17 @@ import json
 import pytest
 import requests
 from jsonschema import validate
+from tests.test_base import MCPBaseTest
 
 # Get server URL from environment
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8080")
 
-class TestPrompts:
+class TestPrompts(MCPBaseTest):
     """Test suite for MCP prompts compliance."""
+    
+    def __init__(self):
+        """Initialize the test class."""
+        super().__init__()
     
     def setup_method(self):
         """Set up the test by initializing the server."""
@@ -245,11 +250,8 @@ class TestPrompts:
         
         # We can't test if the notification is actually sent,
         # but we can verify the capability is declared if required
-    
-    def _send_request(self, payload):
-        """Send a JSON-RPC request to the server."""
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-        return requests.post(MCP_SERVER_URL, json=payload, headers=headers) 
+        
+        # Note: We can't fully test this as we'd need to trigger a list change
+        # and capture the notification, which requires async communication
+
+    # Remove the _send_request method since it's now provided by the parent class 

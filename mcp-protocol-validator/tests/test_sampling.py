@@ -318,4 +318,9 @@ class TestSampling:
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
-        return requests.post(MCP_CLIENT_URL, json=payload, headers=headers) 
+        
+        client_url = os.environ.get("MCP_CLIENT_URL", "http://localhost:8766")
+        
+        # For now we only support HTTP transport to clients
+        # Future implementations could support STDIO for client testing as well
+        return requests.post(client_url, json=payload, headers=headers) 

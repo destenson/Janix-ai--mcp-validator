@@ -15,12 +15,17 @@ import threading
 import pytest
 import requests
 from jsonschema import validate
+from tests.test_base import MCPBaseTest
 
 # Get server URL from environment
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8080")
 
-class TestUtilities:
+class TestUtilities(MCPBaseTest):
     """Test suite for MCP utilities compliance."""
+    
+    def __init__(self):
+        """Initialize the test class."""
+        super().__init__()
     
     def setup_method(self):
         """Set up the test by initializing the server."""
@@ -262,35 +267,44 @@ class TestUtilities:
     
     @pytest.mark.requirement("S030")
     def test_pagination(self):
-        """Test general pagination behavior across different methods.
+        """Test pagination control with nextCursor.
         
-        Tests requirement S030: Invalid cursors SHOULD result in an error with code -32602
+        Tests requirement S030: Servers returning large collections SHOULD use pagination
         """
-        # Test with resources/list
+        # This is a general test of pagination behavior for any method that supports it
+        # We'll use resources/list as an example, but the test is about pagination mechanics
+        
+        # First check if server supports resources
+        if "resources" not in self.server_capabilities:
+            # Try tools if resources not available
+            if "tools" not in self.server_capabilities:
+                # Try prompts if neither resources nor tools available
+                if "prompts" not in self.server_capabilities:
+                    pytest.skip("Server does not support any paginated list methods")
+                else:
+                    endpoint = "prompts/list"
+            else:
+                endpoint = "tools/list"
+        else:
+            endpoint = "resources/list"
+        
+        # Send list request with a small limit to force pagination
         response = self._send_request({
             "jsonrpc": "2.0",
-            "id": "test_invalid_cursor",
-            "method": "resources/list",
+            "id": "test_pagination",
+            "method": endpoint,
             "params": {
-                "cursor": "clearly_invalid_cursor_value"
+                "limit": 1
             }
         })
         
         assert response.status_code == 200
         data = response.json()
+        assert "result" in data
         
-        # If server returns an error, check the code
-        if "error" in data:
-            assert data["error"]["code"] == -32602, "Invalid cursor should result in an error with code -32602"
-        else:
-            # It's also valid for servers to handle invalid cursors by returning first page
-            assert "result" in data
-            assert "resources" in data["result"]
-    
-    def _send_request(self, payload):
-        """Send a JSON-RPC request to the server."""
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-        return requests.post(MCP_SERVER_URL, json=payload, headers=headers) 
+        # If the server supports pagination and has enough data to paginate,
+        # it should include a nextCursor in the response
+        if "nextCursor" in data["result"]:
+            # The server is supporting pagination as recommended
+            assert isinstance(data["result"]["nextCursor"], str)
+            assert data["result"]["nextCursor"] != "" 

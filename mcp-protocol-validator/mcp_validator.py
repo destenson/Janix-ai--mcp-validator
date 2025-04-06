@@ -13,6 +13,7 @@ import sys
 import json
 import click
 import subprocess
+import time
 from pathlib import Path
 import pytest
 from rich.console import Console
@@ -21,6 +22,9 @@ from rich.progress import Progress
 
 # Initialize rich console for better output
 console = Console()
+
+# Global variable to hold server process for STDIO transport
+SERVER_PROCESS = None
 
 @click.group()
 @click.version_option(version="0.1.0")
@@ -36,6 +40,8 @@ def cli():
 @click.option("--test-modules", help="Comma-separated list of test modules to run (base,resources,tools,prompts,utilities)")
 def test(url, server_command, report, format, test_modules):
     """Run compliance tests against an MCP server."""
+    global SERVER_PROCESS
+    
     console.print(f"[bold green]MCP Protocol Validator[/bold green]")
     console.print(f"Testing server at: [bold]{url}[/bold]")
     
@@ -47,15 +53,41 @@ def test(url, server_command, report, format, test_modules):
             server_command, 
             shell=True, 
             stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1  # Line buffered
         )
         # Wait for server to start
         console.print("Waiting for server to start...")
-        # TODO: Implement proper wait-for-server logic
+        time.sleep(2)  # Give the server a moment to initialize
+        # Store process in global variable for STDIO transport
+        SERVER_PROCESS = server_process
     
     try:
         # Set up environment variables for tests
         os.environ["MCP_SERVER_URL"] = url
+        
+        # Determine transport type and configure environment
+        if server_command:
+            # Set environment variable to indicate STDIO transport should be used
+            os.environ["MCP_TRANSPORT_TYPE"] = "stdio"
+            console.print("[bold blue]Using STDIO transport[/bold blue]")
+            
+            # Import the test_base module to set up the global server process
+            try:
+                from mcp_protocol_validator.tests.test_base import set_server_process
+            except ImportError:
+                try:
+                    from tests.test_base import set_server_process
+                except ImportError:
+                    console.print("[bold red]Error: Could not import test_base module![/bold red]")
+                    return 1
+            
+            set_server_process(SERVER_PROCESS)
+        else:
+            # Using HTTP transport
+            os.environ["MCP_TRANSPORT_TYPE"] = "http"
+            console.print("[bold blue]Using HTTP transport[/bold blue]")
         
         # Build pytest args
         pytest_args = ["-v"]
@@ -111,6 +143,8 @@ def test(url, server_command, report, format, test_modules):
                 server_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 server_process.kill()
+        # Clear global reference
+        SERVER_PROCESS = None
 
 @cli.command()
 def schema():

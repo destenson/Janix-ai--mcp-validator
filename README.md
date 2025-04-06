@@ -11,6 +11,7 @@ The MCP Protocol Validator is a containerized test suite designed to ensure comp
 - **Detailed Reports**: Generate HTML or JSON reports for compliance analysis
 - **CI Integration**: GitHub Action for continuous validation
 - **Weighted Compliance Scoring**: Prioritizes critical requirements for accurate compliance assessment
+- **Multi-transport Support**: Test both HTTP and STDIO transport implementations
 
 ## Features
 
@@ -56,20 +57,22 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Isolated Testing (Recommended)
+### Isolated Testing (HTTP Transport)
 
-The most reliable way to validate your MCP server implementation:
+The reliable way to validate your HTTP-based MCP server implementation:
 
 ```bash
 # 1. Create a Docker network for isolation
 docker network create mcp-test-network
 
-# 2. Run your server in Docker with the test network
+# 2. Run your MCP server implementation in Docker with the test network
+# Replace 'your-server-image:latest' with your actual MCP server Docker image
 docker run --rm --name mcp-server --network mcp-test-network \
   -d your-server-image:latest
 
-# 3. Run validator tests against your containerized server
+# 3. Run the validator against your containerized MCP server
 docker run --rm --network mcp-test-network mcp-validator \
+  test \
   --url http://mcp-server:your-port/mcp \
   --report ./compliance-report.html \
   --format html
@@ -85,12 +88,66 @@ This approach:
 - Provides consistent testing results
 - Makes it easy to reset for clean testing
 
-### Testing External Servers
+### STDIO Transport Testing
 
-Test an MCP server using Docker:
+For testing MCP servers that implement the STDIO transport mechanism:
 
 ```bash
+# 1. Create a Docker network for isolation
+docker network create mcp-test-network
+
+# 2. Test a STDIO-based server using the server-command parameter
+# The validator will launch your server and communicate via stdin/stdout
+docker run --rm --network mcp-test-network mcp-validator \
+  test \
+  --url http://localhost \
+  --server-command "your-server-launch-command" \
+  --report ./compliance-report.html \
+  --format html
+
+# 3. Clean up when done
+docker network rm mcp-test-network
+```
+
+> **Important Note**: Although we're testing via STDIO transport, the validator still requires the `--url` parameter with a valid URL format. Use `http://localhost` as a placeholder; it won't actually be used for communication. The `--server-command` parameter is what initiates STDIO-based testing.
+
+#### How STDIO Testing Works
+
+In this approach:
+- The validator launches your server as a subprocess using the `--server-command` parameter
+- Communication happens over stdin/stdout as per STDIO transport specification
+- The validator handles all the necessary plumbing for STDIO-based testing
+- Your server must read JSON-RPC messages from stdin and write responses to stdout
+
+#### Example: Testing a Filesystem MCP Server
+
+Here's a specific example for testing a filesystem-based MCP server with bound volumes:
+
+```bash
+docker run --rm --network mcp-test-network mcp-validator \
+  test \
+  --url http://localhost \
+  --server-command "docker run -i --rm --network mcp-test-network \
+    --mount type=bind,src=/Users/username/Desktop,dst=/projects/Desktop \
+    --mount type=bind,src=/path/to/other/allowed/dir,dst=/projects/other/allowed/dir,ro \
+    --mount type=bind,src=/path/to/file.txt,dst=/projects/path/to/file.txt \
+    mcp/filesystem /projects" \
+  --report ./compliance-report.html \
+  --format html
+```
+
+> **Note**: The `-i` flag in the server command is essential as it keeps stdin open, which is required for STDIO transport.
+
+Replace the mount paths and target directories with your actual configuration.
+
+### Testing External Servers
+
+Test your MCP server implementation using Docker:
+
+```bash
+# Replace the URL with your actual MCP server endpoint
 docker run --rm mcp-validator \
+  test \
   --url https://your-mcp-server.com/mcp \
   --report ./reports/compliance-report.html \
   --format html
@@ -99,7 +156,9 @@ docker run --rm mcp-validator \
 Test specific modules:
 
 ```bash
+# Replace the URL with your actual MCP server endpoint
 docker run --rm mcp-validator \
+  test \
   --url https://your-mcp-server.com/mcp \
   --test-modules base,resources,tools \
   --report ./reports/compliance-report.html \
@@ -174,6 +233,40 @@ Based on the calculated score, implementations are classified into one of these 
 
 For more details, see [Compliance Scoring](docs/compliance-scoring.md).
 
+## Troubleshooting
+
+### Transport Compatibility
+
+The MCP Protocol Validator is designed to work with servers implementing either transport mechanism:
+
+- **HTTP Transport**: The default testing mode, activated by providing the `--url` parameter without a `--server-command`.
+- **STDIO Transport**: Activated by providing both `--url` and `--server-command` parameters. The validator will spawn your server as a subprocess and communicate via stdin/stdout.
+
+If you're having issues:
+
+1. **Check for MCP Server Environment Variable**: Make sure `MCP_SERVER_URL` is properly set when using the validator. For STDIO testing, you might need to use:
+   ```bash
+   export MCP_SERVER_URL=http://localhost
+   ```
+
+2. **Examine the Generated Report**: Even if tests fail with connection errors, the HTML report might still contain useful information about which tests were attempted.
+
+3. **Alternate Approach**: You might need to run the validator directly (not in Docker) for STDIO testing:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   python mcp_validator.py test --url http://localhost --server-command "your-server-command"
+   ```
+
+4. **Debug Transport Issues**: If you're experiencing connection problems, try:
+   - For HTTP: Check the server logs and ensure the server is accepting connections on the specified URL
+   - For STDIO: Add debugging output to stderr in your server to diagnose communication issues
+
+5. **Test Order**: We recommend testing with HTTP transport first if your server supports it, as it's easier to debug and provides clearer error messages. Once HTTP transport is working, you can test STDIO transport.
+
+We're working to improve STDIO transport testing in future releases.
+
 ## Reports
 
 Reports are generated in the format specified by the `--format` option:
@@ -228,3 +321,38 @@ The test suite is based on the Model Context Protocol specification version 2025
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Troubleshooting
+
+### STDIO Transport Issues
+
+When testing STDIO-based servers, you might encounter errors like:
+
+```
+requests.exceptions.MissingSchema: Invalid URL 'http://localhost': No scheme supplied. Perhaps you meant https://http://localhost?
+```
+
+or
+
+```
+requests.exceptions.ConnectionError: Connection refused
+```
+
+These errors occur because parts of the validator may still attempt to use HTTP requests even when STDIO transport is intended. Some potential workarounds:
+
+1. **Check for MCP Server Environment Variable**: Make sure `MCP_SERVER_URL` is properly set when using the validator. For STDIO testing, you might need to use:
+   ```bash
+   export MCP_SERVER_URL=http://localhost
+   ```
+
+2. **Examine the Generated Report**: Even if tests fail with connection errors, the HTML report might still contain useful information about which tests were attempted.
+
+3. **Alternate Approach**: You might need to run the validator directly (not in Docker) for STDIO testing:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   python mcp_validator.py test --url http://localhost --server-command "your-server-command"
+   ```
+
+We're working to improve STDIO transport testing in future releases.
