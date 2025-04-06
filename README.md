@@ -7,7 +7,7 @@ A comprehensive testing tool for validating Model Context Protocol (MCP) server 
 The MCP Protocol Validator is a containerized test suite designed to ensure compliance with the Model Context Protocol specification. It provides:
 
 - **Comprehensive Tests**: Verifies all essential aspects of the MCP specification
-- **Easy Setup**: Run with a single command using Docker
+- **Isolated Testing**: Run both your server and the validator in a controlled Docker environment
 - **Detailed Reports**: Generate HTML or JSON reports for compliance analysis
 - **CI Integration**: GitHub Action for continuous validation
 - **Weighted Compliance Scoring**: Prioritizes critical requirements for accurate compliance assessment
@@ -23,30 +23,59 @@ The MCP Protocol Validator is a containerized test suite designed to ensure comp
 
 ## Installation
 
-### Using Docker (Recommended)
+### Download Repository (Recommended)
+
+```bash
+# Clone the repository
+git clone https://github.com/your-org/mcp-protocol-validator.git
+cd mcp-protocol-validator
+
+# Build the validator Docker image locally
+docker build -t mcp-validator ./mcp-protocol-validator
+```
+
+### Using Pre-built Docker Image
 
 ```bash
 docker pull yourorg/mcp-protocol-validator:latest
 ```
 
-### From Source
-
-```bash
-git clone https://github.com/your-org/mcp-protocol-validator.git
-cd mcp-protocol-validator
-
-# Install dependencies
-pip install -r mcp-protocol-validator/requirements.txt
-```
-
 ## Usage
 
-### Command Line
+### Isolated Testing (Recommended)
+
+The most reliable way to validate your MCP server implementation:
+
+```bash
+# 1. Create a Docker network for isolation
+docker network create mcp-test-network
+
+# 2. Run your server in Docker with the test network
+docker run --rm --name mcp-server --network mcp-test-network \
+  -d your-server-image:latest
+
+# 3. Run validator tests against your containerized server
+docker run --rm --network mcp-test-network mcp-validator \
+  --url http://mcp-server:your-port/mcp \
+  --report ./compliance-report.html
+
+# 4. Clean up when done
+docker stop mcp-server
+docker network rm mcp-test-network
+```
+
+This approach:
+- Isolates both server and validator in a controlled environment
+- Prevents external network interference
+- Provides consistent testing results
+- Makes it easy to reset for clean testing
+
+### Testing External Servers
 
 Test an MCP server using Docker:
 
 ```bash
-docker run --rm yourorg/mcp-protocol-validator:latest \
+docker run --rm mcp-validator \
   --url https://your-mcp-server.com/mcp \
   --report ./reports/compliance-report.html
 ```
@@ -54,7 +83,7 @@ docker run --rm yourorg/mcp-protocol-validator:latest \
 Test specific modules:
 
 ```bash
-docker run --rm yourorg/mcp-protocol-validator:latest \
+docker run --rm mcp-validator \
   --url https://your-mcp-server.com/mcp \
   --test-modules base,resources,tools \
   --report ./reports/compliance-report.html
@@ -142,18 +171,18 @@ See a [sample report](docs/updated-sample-report.md) for an example.
 
 ## Development
 
-### Running Tests
-
-```bash
-cd mcp-protocol-validator
-python -m pytest
-```
-
 ### Building the Docker Image
 
 ```bash
 cd mcp-protocol-validator
-docker build -t mcp-protocol-validator .
+docker build -t mcp-validator .
+```
+
+### Running Internal Tests
+
+```bash
+cd mcp-protocol-validator
+python -m pytest
 ```
 
 ## Specification Compliance
