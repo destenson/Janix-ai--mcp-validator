@@ -10,6 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY mcp_validator.py .
 COPY tests/ ./tests/
 COPY schema/ ./schema/
+COPY pytest.ini .
+COPY conftest.py .
 
 # Create entrypoint
 ENTRYPOINT ["python", "mcp_validator.py"]

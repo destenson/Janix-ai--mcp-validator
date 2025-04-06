@@ -32,7 +32,7 @@ git clone https://github.com/Janix-ai/mcp-protocol-validator.git
 cd mcp-protocol-validator
 
 # Build the validator Docker image locally
-docker build -t mcp-validator .
+docker build --no-cache -t mcp-validator .
 ```
 
 ### Using Pre-built Docker Image
@@ -295,7 +295,7 @@ See a [sample report](docs/updated-sample-report.md) for an example.
 
 ```bash
 cd mcp-protocol-validator
-docker build -t mcp-validator .
+docker build --no-cache -t mcp-validator .
 ```
 
 ### Running Internal Tests

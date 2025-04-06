@@ -21,12 +21,11 @@ MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8080")
 class TestTools(MCPBaseTest):
     """Test suite for MCP tools compliance."""
     
-    def __init__(self):
-        """Initialize the test class."""
-        super().__init__()
-    
-    def setup_method(self):
+    def setup_method(self, method):
         """Set up the test by initializing the server."""
+        # Call parent setup_method to initialize common attributes
+        super().setup_method(method)
+        
         # Initialize the server
         response = self._send_request({
             "jsonrpc": "2.0",

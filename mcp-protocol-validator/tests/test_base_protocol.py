@@ -22,10 +22,6 @@ MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:8080")
 class TestBaseProtocol(MCPBaseTest):
     """Test suite for MCP base protocol compliance."""
     
-    def __init__(self):
-        """Initialize the base test class."""
-        super().__init__()
-    
     @pytest.mark.requirement("M001")
     def test_jsonrpc_version(self):
         """Verify the server requires and responds with JSON-RPC 2.0.
@@ -256,6 +252,4 @@ class TestBaseProtocol(MCPBaseTest):
         assert isinstance(data, list)
         assert len(data) == 2
         assert data[0]["id"] == "batch_1"
-        assert data[1]["id"] == "batch_2"
-    
-    # Remove the _send_request method since it's now provided by the parent class 
+        assert data[1]["id"] == "batch_2" 

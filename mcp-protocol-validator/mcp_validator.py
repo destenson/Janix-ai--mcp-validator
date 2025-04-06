@@ -19,6 +19,7 @@ import pytest
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress
+import threading
 
 # Initialize rich console for better output
 console = Console()
@@ -36,16 +37,21 @@ def cli():
 @click.option("--url", required=True, help="URL of the MCP server to test")
 @click.option("--server-command", help="Command to start a local MCP server")
 @click.option("--report", default="./mcp-compliance-report.html", help="Path to save the test report")
-@click.option("--format", default="html", type=click.Choice(["html", "markdown", "json"]), help="Report format")
+@click.option("--format", default="html", type=click.Choice(["html", "json", "markdown"]), help="Report format")
 @click.option("--test-modules", help="Comma-separated list of test modules to run (base,resources,tools,prompts,utilities)")
-def test(url, server_command, report, format, test_modules):
-    """Run compliance tests against an MCP server."""
+@click.option("--debug", is_flag=True, help="Enable debug output, especially for STDIO transport")
+def test(url, server_command, report, format, test_modules, debug):
+    """Run protocol compliance tests against an MCP server."""
     global SERVER_PROCESS
+    
+    # Set debug mode
+    if debug:
+        os.environ["MCP_DEBUG_STDIO"] = "1"
+        console.print("[bold yellow]Debug mode enabled[/bold yellow]")
     
     console.print(f"[bold green]MCP Protocol Validator[/bold green]")
     console.print(f"Testing server at: [bold]{url}[/bold]")
     
-    # Start local server if specified
     server_process = None
     if server_command:
         console.print(f"Starting local server: {server_command}")
@@ -62,6 +68,17 @@ def test(url, server_command, report, format, test_modules):
         time.sleep(2)  # Give the server a moment to initialize
         # Store process in global variable for STDIO transport
         SERVER_PROCESS = server_process
+        
+        # If in debug mode, start a thread to print server stderr output
+        if debug:
+            def print_server_stderr():
+                while server_process and server_process.poll() is None:
+                    line = server_process.stderr.readline()
+                    if line:
+                        console.print(f"[dim][SERVER][/dim] {line.decode('utf-8').rstrip()}")
+            
+            stderr_thread = threading.Thread(target=print_server_stderr, daemon=True)
+            stderr_thread.start()
     
     try:
         # Set up environment variables for tests

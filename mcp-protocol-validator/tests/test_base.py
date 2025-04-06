@@ -9,6 +9,9 @@ Base test classes for MCP test suites.
 import os
 import json
 import requests
+import sys
+import time
+import select
 from typing import Dict, Any, Optional
 
 # Get environment variables for testing configuration
@@ -32,8 +35,12 @@ def set_server_process(process):
 class MCPBaseTest:
     """Base class for all MCP test suites."""
     
-    def __init__(self):
-        """Initialize the base test class with common attributes."""
+    def setup_method(self, method):
+        """Initialize the base test class with common attributes.
+        
+        This uses pytest's setup_method which runs before each test method
+        instead of __init__ which causes pytest collection issues.
+        """
         self.server_url = MCP_SERVER_URL
         self.client_url = MCP_CLIENT_URL
         self.transport_type = MCP_TRANSPORT_TYPE
@@ -112,32 +119,95 @@ class MCPBaseTest:
         """
         global SERVER_PROCESS
         
+        # Debug mode can be enabled via environment variable
+        debug = os.environ.get("MCP_DEBUG_STDIO", "0").lower() in ("1", "true", "yes")
+        
         if SERVER_PROCESS is None:
+            error_msg = "Server process is not available for STDIO transport"
+            if debug:
+                print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
             # Mock response for when server process is not available
             return MockResponse(
                 status_code=500,
-                json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": "Server not available"}}
+                json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
             )
         
         try:
             # Convert data to JSON string and add newline
             request_str = json.dumps(data) + "\n"
             
+            if debug:
+                print(f"STDIO sending: {request_str.strip()}", file=sys.stderr)
+            
             # Write to server's stdin
             SERVER_PROCESS.stdin.write(request_str.encode('utf-8'))
             SERVER_PROCESS.stdin.flush()
             
-            # Read response from stdout
-            response_line = SERVER_PROCESS.stdout.readline().decode('utf-8').strip()
-            response_data = json.loads(response_line)
+            # Read response from stdout with timeout
+            response_line = ""
+            start_time = time.time()
+            timeout = 5.0  # 5 second timeout for response
             
-            # Create a mock response object
-            return MockResponse(status_code=200, json_data=response_data)
+            # Check if process is still alive
+            if SERVER_PROCESS.poll() is not None:
+                error_msg = f"Server process terminated with exit code {SERVER_PROCESS.returncode}"
+                if debug:
+                    print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                return MockResponse(
+                    status_code=500,
+                    json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
+                )
+            
+            # Try to read with timeout using select
+            readable, _, _ = select.select([SERVER_PROCESS.stdout], [], [], timeout)
+            if readable:
+                response_line = SERVER_PROCESS.stdout.readline().decode('utf-8').strip()
+                
+                if debug:
+                    print(f"STDIO received: {response_line}", file=sys.stderr)
+                    
+                if not response_line:
+                    error_msg = "Empty response from server"
+                    if debug:
+                        print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                    return MockResponse(
+                        status_code=500,
+                        json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
+                    )
+                
+                try:
+                    response_data = json.loads(response_line)
+                    # Create a mock response object
+                    return MockResponse(status_code=200, json_data=response_data)
+                except json.JSONDecodeError as e:
+                    error_msg = f"Invalid JSON in response: {str(e)}"
+                    if debug:
+                        print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                        print(f"Response was: {response_line}", file=sys.stderr)
+                    return MockResponse(
+                        status_code=500,
+                        json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
+                    )
+            else:
+                # Timeout occurred
+                error_msg = f"Timeout waiting for response after {timeout} seconds"
+                if debug:
+                    print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                return MockResponse(
+                    status_code=500,
+                    json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": error_msg}}
+                )
         except Exception as e:
+            error_msg = f"STDIO communication error: {str(e)}"
+            if debug:
+                print(f"STDIO ERROR: {error_msg}", file=sys.stderr)
+                import traceback
+                traceback.print_exc(file=sys.stderr)
             # Return error response on failure
+            request_id = data.get("id") if isinstance(data, dict) else None
             return MockResponse(
                 status_code=500,
-                json_data={"jsonrpc": "2.0", "id": data.get("id"), "error": {"code": -32000, "message": f"STDIO communication error: {str(e)}"}}
+                json_data={"jsonrpc": "2.0", "id": request_id, "error": {"code": -32000, "message": error_msg}}
             )
     
     def _send_request_to_client(self, data: Dict[str, Any]) -> requests.Response:
