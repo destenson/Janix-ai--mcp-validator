@@ -1,3 +1,0 @@
-{"jsonrpc": "2.0", "id": "test_init", "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "TestClient", "version": "1.0"}}}
-{"jsonrpc": "2.0", "method": "initialized", "params": {}}
-{"jsonrpc": "2.0", "id": "tools_list", "method": "tools/list", "params": {}}

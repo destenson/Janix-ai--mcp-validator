@@ -11,7 +11,12 @@ when using STDIO transport.
 
 import os
 import json
+import sys
 import pytest
+from pathlib import Path
+
+# Add parent directory to the path to fix imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from tests.test_base import MCPBaseTest
 
 # Get environment variables for testing configuration

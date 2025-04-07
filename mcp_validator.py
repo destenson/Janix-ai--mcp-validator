@@ -10,13 +10,29 @@ providing a unified interface for testing MCP servers with different
 transport protocols and protocol versions.
 """
 
-import asyncio
-import importlib
 import os
 import sys
-import pytest
+import importlib.util
+
+# Check if running in a virtual environment
+in_venv = sys.prefix != sys.base_prefix
+
+# If not in a virtual environment, re-execute this script in the .venv Python
+if not in_venv and os.path.exists(".venv/bin/python"):
+    print("Activating virtual environment...")
+    os.environ["PYTHONPATH"] = "." + (":" + os.environ["PYTHONPATH"] if "PYTHONPATH" in os.environ else "")
+    os.execv(".venv/bin/python", [".venv/bin/python"] + sys.argv)
+
+# Add the current directory to the Python path
+if "." not in sys.path:
+    sys.path.insert(0, ".")
+
+# Now that we're in the right environment, import dependencies
+import asyncio
+import importlib
 from pathlib import Path
 from typing import List, Optional
+import pytest
 
 # Import our configuration and logging utilities
 from utils.config import get_config, MCPValidatorConfig
@@ -119,24 +135,35 @@ async def main() -> int:
     Returns:
         The exit code (0 for success, non-zero for failure)
     """
+    # Print environment information if debug is enabled
+    if any(arg in ["--debug", "-d"] or arg.startswith("--debug=") for arg in sys.argv):
+        print(f"Python version: {sys.version}")
+        print(f"Python executable: {sys.executable}")
+        print(f"PYTHONPATH: {os.environ.get('PYTHONPATH', 'Not set')}")
+    
     # Get configuration
     config = get_config()
     
-    # Handle different commands
-    if sys.argv[1:] and sys.argv[1] == "compare":
-        # We're comparing protocol versions
-        if len(sys.argv) < 4:
-            print("Usage: python mcp_validator.py compare --version1 <version1> --version2 <version2> [--output <output>]")
-            return 1
+    # Check if any command-line arguments were provided
+    if len(sys.argv) > 1:
+        # Handle different commands
+        if sys.argv[1] == "compare":
+            # We're comparing protocol versions
+            if len(sys.argv) < 4:
+                print("Usage: python run_validator.py compare --version1 <version1> --version2 <version2> [--output <o>]")
+                return 1
+                
+            version1 = sys.argv[2]
+            version2 = sys.argv[3]
+            output = sys.argv[4] if len(sys.argv) > 4 else "comparison.html"
             
-        version1 = sys.argv[2]
-        version2 = sys.argv[3]
-        output = sys.argv[4] if len(sys.argv) > 4 else "comparison.html"
-        
-        return compare_versions(version1, version2, output)
-    else:
-        # We're running tests
-        return run_tests(config)
+            return compare_versions(version1, version2, output)
+        elif sys.argv[1] == "test":
+            # We're running tests with explicit "test" command
+            return run_tests(config)
+    
+    # Default to running tests if no command is specified
+    return run_tests(config)
 
 
 if __name__ == "__main__":

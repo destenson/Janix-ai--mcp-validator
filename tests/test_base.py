@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Union, List
 
 # Import our transport layer
-from transport import STDIOTransport, HTTPTransport, DockerSTDIOTransport
+from transport import STDIOTransport, HTTPTransport
 from transport.base import MCPTransport
+from transport.enhanced_docker_client import EnhancedDockerSTDIOTransport
 
 # Import protocol adapters
 from protocols import get_protocol_adapter, MCPProtocolAdapter
@@ -116,6 +117,7 @@ class MCPBaseTest:
         elif MCP_TRANSPORT_TYPE == "stdio":
             # Use STDIOTransport for STDIO transport
             try:
+                # Import from the correct module
                 from transport.stdio_client import STDIOTransport
                 
                 # Create or reuse a transport instance
@@ -127,8 +129,8 @@ class MCPBaseTest:
                     
                     self.stdio_transport = STDIOTransport(
                         command=server_command,
-                        debug=MCP_DEBUG,
-                        timeout=int(os.environ.get("MCP_TIMEOUT", "30"))
+                        timeout=int(os.environ.get("MCP_TIMEOUT", "30")),
+                        debug=MCP_DEBUG
                     )
                     self.stdio_transport.start()
                 
@@ -171,9 +173,13 @@ class MCPBaseTest:
                 raise ValueError("server_command must be specified for STDIO transport")
         elif MCP_TRANSPORT_TYPE == "docker":
             if self.config.docker_image:
-                return DockerSTDIOTransport(
+                # Use the enhanced Docker transport
+                return EnhancedDockerSTDIOTransport(
                     docker_image=self.config.docker_image,
-                    mount_dir=self.config.mount_dir,
+                    mount_path=self.config.mount_dir,
+                    container_path="/projects",
+                    network_name="mcp-test-network",
+                    protocol_version=self.protocol_version,
                     debug=MCP_DEBUG,
                     timeout=self.config.timeout
                 )

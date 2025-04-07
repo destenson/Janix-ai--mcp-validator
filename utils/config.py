@@ -125,33 +125,42 @@ def get_config() -> MCPValidatorConfig:
     config = load_config_from_env()
     
     # Parse command-line args
-    args = parse_args()
+    try:
+        args = parse_args()
+    except SystemExit as e:
+        # If argparse exits (e.g., with --help), pass through the exit code
+        import sys
+        sys.exit(e.code)
     
-    # If the command is 'test', update config with command-line args
-    if getattr(args, "command", None) == "test":
-        if args.transport:
+    # Handle the case when no command is specified (use test as default)
+    command = getattr(args, "command", None)
+    
+    # If the command is 'test' or no command is specified, update config with command-line args
+    if command == "test" or command is None:
+        # Handle args that may not be present if no command was specified
+        if hasattr(args, "transport") and args.transport:
             config.transport_type = args.transport
-        if args.url:
+        if hasattr(args, "url") and args.url:
             config.server_url = args.url
-        if args.server_command:
+        if hasattr(args, "server_command") and args.server_command:
             config.server_command = args.server_command
-        if args.docker_image:
+        if hasattr(args, "docker_image") and args.docker_image:
             config.docker_image = args.docker_image
-        if args.mount_dir:
+        if hasattr(args, "mount_dir") and args.mount_dir:
             config.mount_dir = args.mount_dir
-        if args.protocol_version:
+        if hasattr(args, "protocol_version") and args.protocol_version:
             config.protocol_version = args.protocol_version
-        if args.test_modules:
+        if hasattr(args, "test_modules") and args.test_modules:
             config.test_modules = args.test_modules
-        if args.report_format:
+        if hasattr(args, "report_format") and args.report_format:
             config.report_format = args.report_format
-        if args.report_path:
+        if hasattr(args, "report_path") and args.report_path:
             config.report_path = args.report_path
-        if args.debug:
+        if hasattr(args, "debug") and args.debug:
             config.debug = args.debug
-        if args.timeout:
+        if hasattr(args, "timeout") and args.timeout:
             config.timeout = args.timeout
-        if args.max_retries:
+        if hasattr(args, "max_retries") and args.max_retries:
             config.max_retries = args.max_retries
     
     return config 
