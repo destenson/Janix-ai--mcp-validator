@@ -40,6 +40,7 @@ class MinimalMCPServer:
         self.negotiated_version = DEFAULT_PROTOCOL_VERSION
         self.client_capabilities = {}
         self.resources = {}
+        self.pending_async_calls = {}  # Store pending async tool calls
         
         logger.info(f"Minimal MCP STDIO Server initializing")
         logger.info(f"Default protocol version: {DEFAULT_PROTOCOL_VERSION}")
@@ -256,6 +257,12 @@ class MinimalMCPServer:
             return self.handle_tools_list(params)
         elif method == "tools/call":
             return self.handle_tools_call(params)
+        elif method == "tools/call-async":
+            return self.handle_tools_call_async(params)
+        elif method == "tools/result":
+            return self.handle_tools_result(params)
+        elif method == "tools/cancel":
+            return self.handle_tools_cancel(params)
             
         # Server info method
         elif method == "server/info":
@@ -326,6 +333,7 @@ class MinimalMCPServer:
         # Only include resources capability for 2025-03-26
         if self.negotiated_version == "2025-03-26":
             capabilities["resources"] = True
+            capabilities["tools"]["asyncSupported"] = True  # Use asyncSupported for 2025-03-26
         elif self.negotiated_version == "2024-11-05" and "supports" in self.client_capabilities:
             # For 2024-11-05, use the "supports" field
             if self.client_capabilities["supports"].get("resources", False):
@@ -422,6 +430,24 @@ class MinimalMCPServer:
                     "type": "object",
                     "properties": {
                         "sum": {
+                            "type": "number"
+                        }
+                    }
+                }
+            },
+            {
+                "name": "sleep",
+                "description": "Sleep for a specified duration (useful for testing async functionality)",
+                "parameters": {
+                    "duration": {
+                        "type": "number",
+                        "description": "Sleep duration in seconds"
+                    }
+                },
+                "returnType": {
+                    "type": "object",
+                    "properties": {
+                        "slept": {
                             "type": "number"
                         }
                     }
@@ -543,6 +569,22 @@ class MinimalMCPServer:
                 }
             except ValueError:
                 raise InvalidParamsError("Arguments must be numbers")
+        elif tool_name == "sleep":
+            if "duration" not in arguments:
+                raise InvalidParamsError("Missing required argument: duration")
+            try:
+                duration = float(arguments["duration"])
+                if duration > 10:  # Limit sleep duration for safety
+                    duration = 10
+                # For synchronous call, actually sleep
+                time.sleep(duration)
+                return {
+                    "content": {
+                        "slept": duration
+                    }
+                }
+            except ValueError:
+                raise InvalidParamsError("Duration must be a number")
         elif tool_name == "list_directory":
             if "path" not in arguments:
                 raise InvalidParamsError("Missing required argument: path")
@@ -585,6 +627,204 @@ class MinimalMCPServer:
             }
         else:
             raise MethodNotFoundError(f"Tool not found: {tool_name}")
+    
+    def handle_tools_call_async(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle the tools/call-async method.
+        
+        Args:
+            params: The method parameters
+            
+        Returns:
+            The async tool call ID
+            
+        Raises:
+            InvalidParamsError: If the parameters are invalid
+        """
+        if self.negotiated_version != "2025-03-26":
+            raise MethodNotFoundError("Async tool calls are only supported in protocol version 2025-03-26")
+            
+        if "name" not in params:
+            raise InvalidParamsError("Missing required parameter: name")
+            
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments", {})
+        
+        # Generate a call ID
+        call_id = str(uuid.uuid4())
+        
+        # Store the call details for later processing
+        self.pending_async_calls[call_id] = {
+            "name": tool_name,
+            "arguments": arguments,
+            "status": "running",
+            "createdAt": int(time.time() * 1000),
+            "result": None,
+            "error": None
+        }
+        
+        # For sleep tool, store the requested duration
+        if tool_name == "sleep" and "duration" in arguments:
+            try:
+                duration = float(arguments["duration"])
+                if duration > 10:  # Limit sleep duration for safety
+                    duration = 10
+                self.pending_async_calls[call_id]["sleepDuration"] = duration
+            except (ValueError, TypeError):
+                # Handle invalid duration in get_result
+                pass
+        
+        # Return the call ID immediately
+        return {
+            "id": call_id
+        }
+    
+    def handle_tools_result(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle the tools/result method.
+        
+        Args:
+            params: The method parameters
+            
+        Returns:
+            The tool result or status
+            
+        Raises:
+            InvalidParamsError: If the parameters are invalid
+        """
+        if self.negotiated_version != "2025-03-26":
+            raise MethodNotFoundError("Async tool calls are only supported in protocol version 2025-03-26")
+            
+        if "id" not in params:
+            raise InvalidParamsError("Missing required parameter: id")
+            
+        call_id = params.get("id", "")
+        
+        # Check if the call exists
+        if call_id not in self.pending_async_calls:
+            raise InvalidParamsError(f"Tool call not found: {call_id}")
+            
+        call_info = self.pending_async_calls[call_id]
+        
+        # If the call is still running, check if it should be completed
+        if call_info["status"] == "running":
+            tool_name = call_info["name"]
+            arguments = call_info["arguments"]
+            current_time = int(time.time() * 1000)
+            elapsed_seconds = (current_time - call_info["createdAt"]) / 1000
+            
+            # Special handling for sleep tool
+            if tool_name == "sleep" and "sleepDuration" in call_info:
+                sleep_duration = call_info["sleepDuration"]
+                
+                # Check if the sleep duration has elapsed
+                if elapsed_seconds >= sleep_duration:
+                    # Sleep completed
+                    call_info["status"] = "completed"
+                    call_info["result"] = {"slept": sleep_duration}
+                    call_info["completedAt"] = current_time
+                else:
+                    # Sleep still in progress
+                    return {
+                        "status": "running"
+                    }
+            else:
+                try:
+                    # Execute other tools (immediately)
+                    result = None
+                    if tool_name == "echo":
+                        if "text" not in arguments:
+                            raise InvalidParamsError("Missing required argument: text")
+                        result = {
+                            "echo": arguments["text"]
+                        }
+                    elif tool_name == "add":
+                        if "a" not in arguments or "b" not in arguments:
+                            raise InvalidParamsError("Missing required arguments: a, b")
+                        try:
+                            a = float(arguments["a"])
+                            b = float(arguments["b"])
+                            result = {
+                                "sum": a + b
+                            }
+                        except ValueError:
+                            raise InvalidParamsError("Arguments must be numbers")
+                    elif tool_name == "sleep":
+                        if "duration" not in arguments:
+                            raise InvalidParamsError("Missing required argument: duration")
+                        try:
+                            duration = float(arguments["duration"])
+                            if duration > 10:  # Limit sleep duration for safety
+                                duration = 10
+                            result = {
+                                "slept": duration
+                            }
+                        except ValueError:
+                            raise InvalidParamsError("Duration must be a number")
+                    elif tool_name in ["list_directory", "read_file", "write_file"]:
+                        # Simulate the execution of these tools
+                        result = {"success": True, "message": f"Async {tool_name} completed"}
+                    else:
+                        raise MethodNotFoundError(f"Tool not found: {tool_name}")
+                    
+                    # Update the call info
+                    call_info["status"] = "completed"
+                    call_info["result"] = result
+                    call_info["completedAt"] = current_time
+                    
+                except Exception as e:
+                    # Handle errors
+                    call_info["status"] = "error"
+                    call_info["error"] = str(e)
+                    call_info["completedAt"] = current_time
+        
+        # Return the current status of the call
+        response = {
+            "status": call_info["status"]
+        }
+        
+        if call_info["status"] == "completed":
+            response["content"] = call_info["result"]
+        elif call_info["status"] == "error":
+            response["error"] = call_info["error"]
+            
+        return response
+    
+    def handle_tools_cancel(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle the tools/cancel method.
+        
+        Args:
+            params: The method parameters
+            
+        Returns:
+            The cancel result
+            
+        Raises:
+            InvalidParamsError: If the parameters are invalid
+        """
+        if self.negotiated_version != "2025-03-26":
+            raise MethodNotFoundError("Async tool calls are only supported in protocol version 2025-03-26")
+            
+        if "id" not in params:
+            raise InvalidParamsError("Missing required parameter: id")
+            
+        call_id = params.get("id", "")
+        
+        # Check if the call exists
+        if call_id not in self.pending_async_calls:
+            raise InvalidParamsError(f"Tool call not found: {call_id}")
+            
+        # Cancel the call
+        call_info = self.pending_async_calls[call_id]
+        if call_info["status"] == "running":
+            # Mark as cancelled (use British spelling with two l's)
+            call_info["status"] = "cancelled"
+            call_info["canceledAt"] = int(time.time() * 1000)
+            
+        return {
+            "success": True
+        }
     
     def handle_resources_list(self) -> Dict[str, Any]:
         """
