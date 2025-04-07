@@ -6,25 +6,26 @@ A testing suite and reference implementation for the [Model Conversation Protoco
 
 This repository contains:
 
-1. **Minimal MCP Server**: A reference implementation of an MCP server
-2. **MCP Testing Framework**: A robust testing framework for verifying MCP server implementations against the protocol specifications
+1. **Minimal MCP Server**: A reference implementation of an MCP server using STDIO transport
+2. **Minimal HTTP MCP Server**: A reference implementation of an MCP server using HTTP transport
+3. **MCP Testing Framework**: A robust testing framework for verifying MCP server implementations against the protocol specifications
 
 ## Status
 
 The current implementation is fully compliant with the latest MCP protocol specification (2025-03-26).
 
-✅ All tests pass for the reference implementation!
+✅ All tests pass for the reference implementations!
 
-## Minimal MCP Server
+## Minimal MCP Server (STDIO)
 
-A simple reference implementation of an MCP server that supports all protocol features:
+A simple reference implementation of an MCP server that uses STDIO for transport and supports all protocol features:
 
 - Basic protocol operations (initialization, shutdown)
 - Synchronous tool calls
 - Asynchronous tool calls (for 2025-03-26)
 - Utility tools for file system operations
 
-### Running the Server
+### Running the STDIO Server
 
 ```bash
 # Run the server
@@ -42,6 +43,41 @@ The minimal server implements these tools:
 - `read_file`: Read a file
 - `write_file`: Write a file
 
+## Minimal HTTP MCP Server
+
+A reference implementation of an MCP server that uses HTTP for transport and supports all protocol features:
+
+- JSON-RPC 2.0 over HTTP implementation
+- Support for both MCP protocol versions (2024-11-05 and 2025-03-26)
+- Synchronous and asynchronous tool calls
+- Resources capability (for 2025-03-26)
+- Batch request support
+- CORS support for browser clients
+
+### Running the HTTP Server
+
+```bash
+# Run the server with default settings (localhost:8000)
+python ./minimal_http_server/minimal_http_server.py
+
+# Run with custom host and port
+python ./minimal_http_server/minimal_http_server.py --host 0.0.0.0 --port 8080
+```
+
+### HTTP Testing Tools
+
+The HTTP server includes testing utilities:
+
+```bash
+# Run a basic HTTP test suite
+python ./minimal_http_server/test_http_server.py
+
+# Run compliance tests against the HTTP server
+python -m mcp_testing.scripts.http_test --server-url http://localhost:8000 --protocol-version 2025-03-26
+```
+
+See the [HTTP Server README](minimal_http_server/README.md) for more details.
+
 ## MCP Testing Framework
 
 A flexible testing framework for verifying MCP server compliance with protocol specifications.
@@ -49,6 +85,7 @@ A flexible testing framework for verifying MCP server compliance with protocol s
 ### Key Features
 
 - Support for both the 2024-11-05 and 2025-03-26 protocol versions
+- Support for both STDIO and HTTP transport protocols
 - Dynamic tool testing that adapts to any server's capabilities
 - Detailed compliance reporting
 - Configurable test modes for targeted functionality testing
@@ -57,8 +94,11 @@ A flexible testing framework for verifying MCP server compliance with protocol s
 ### Running Compliance Tests
 
 ```bash
-# Test the minimal server against the 2025-03-26 specification
+# Test the minimal STDIO server against the 2025-03-26 specification
 python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26
+
+# Test an HTTP server against the 2025-03-26 specification
+python -m mcp_testing.scripts.http_test --server-url http://localhost:8000 --protocol-version 2025-03-26
 
 # Test a server with dynamic adaptation to its capabilities
 python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --dynamic-only --protocol-version 2025-03-26
@@ -75,11 +115,14 @@ python -m mcp_testing.scripts.compliance_report --server-command "/path/to/serve
 The framework generates detailed Markdown reports:
 
 ```bash
-# Generate a compliance report
+# Generate a compliance report for STDIO server
 python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26 --output-dir "./reports"
+
+# Generate a compliance report for HTTP server
+python -m mcp_testing.scripts.http_test --server-url http://localhost:8000 --protocol-version 2025-03-26 --output-dir "./reports"
 ```
 
-Reports now include a section on specification coverage, showing how well the server implements all MUST, SHOULD, and MAY requirements from the official protocol specification.
+Reports include a section on specification coverage, showing how well the server implements all MUST, SHOULD, and MAY requirements from the official protocol specification.
 
 ## Extensions and Customization
 
