@@ -6,6 +6,8 @@ A modular and extensible testing framework for verifying MCP (Model Conversation
 
 This framework provides a set of tools and utilities for testing MCP servers against the protocol specifications. It supports both STDIO and HTTP transports, and can test implementations of both the 2024-11-05 and 2025-03-26 protocol versions.
 
+The framework is designed to be flexible and adapt to any MCP server implementation, regardless of what specific tools or capabilities it provides.
+
 ## Status
 
 **✅ All tests now pass for the reference implementation!**
@@ -40,50 +42,74 @@ The `tests` module contains test cases for various protocol features:
 
 - `base_protocol/`: Tests for basic protocol functionality
 - `features/`: Tests for specific protocol features
-  - `test_tools.py`: Tests for synchronous tool calls
-  - `test_async_tools.py`: Tests for asynchronous tool calls
+  - `test_tools.py`: Standard tests for synchronous tool calls
+  - `test_async_tools.py`: Standard tests for asynchronous tool calls
+  - `dynamic_tool_tester.py`: Dynamic tests that adapt to any server's tool capabilities
+  - `dynamic_async_tools.py`: Dynamic tests for async tool functionality
 
 ### Utils
 
 The `utils` module provides utility classes and functions:
 
 - `runner.py`: Test runner for executing test cases
+- `reporter.py`: Utilities for generating compliance reports
 
 ### Scripts
 
 The `scripts` module provides command-line scripts for running tests:
 
-- `run_stdio_tests.py`: Run tests against an STDIO MCP server
+- `compliance_report.py`: Comprehensive script to test any MCP server and generate reports
 
 ## Usage
 
-### Running Tests
+### Testing Any MCP Server
 
-To run tests against an STDIO MCP server:
+Our testing framework is designed to work with any MCP server implementation:
 
 ```bash
-python -m mcp_testing.scripts.run_stdio_tests --server-command "/path/to/server" --protocol-version 2025-03-26 --debug
+# Basic testing with default settings
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --protocol-version 2025-03-26
+
+# Testing with dynamic adaptation to server capabilities
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --dynamic-only --protocol-version 2025-03-26
+
+# Testing a server that doesn't implement the shutdown method
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --skip-shutdown --protocol-version 2025-03-26
+
+# Testing a specific subset of functionality
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-mode tools --protocol-version 2025-03-26
+
+# Passing additional arguments to the server
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --args "/path/to/directory" --protocol-version 2025-03-26
 ```
 
-Options:
-- `--server-command`: Command to start the server
+#### Options for Compliance Testing
+
+- `--server-command`: Command to start the server (required)
 - `--protocol-version`: Protocol version to test (2024-11-05 or 2025-03-26)
+- `--args`: Additional arguments to pass to the server command
+- `--dynamic-only`: Only run tests that adapt to the server's capabilities
+- `--skip-shutdown`: Skip the shutdown method (for servers that don't implement it)
+- `--skip-async`: Skip async tool tests (for 2025-03-26)
+- `--skip-tests`: Comma-separated list of test names to skip
+- `--test-mode`: Testing mode (all, core, tools, async)
 - `--debug`: Enable debug output
-- `--output-file`: File to write results to (JSON format)
+- `--json`: Generate a JSON report in addition to Markdown
+- `--output-dir`: Directory to store the report files
+- `--report-prefix`: Prefix for report filenames
 
-### Testing Async Tools
+### Testing Specialized Servers
 
-For testing async tool functionality (2025-03-26 protocol), the framework includes:
+For specialized servers such as file system servers that may not implement standard reference tools like "echo" and "add":
 
-1. `test_async_tool_support`: Verifies that the server advertises async tool support
-2. `test_async_echo_tool`: Tests basic async tool execution
-3. `test_async_long_running_tool`: Tests a long-running async operation with status polling
-4. `test_async_tool_cancellation`: Tests cancellation of in-progress async operations
-
-Example:
 ```bash
-# Test async functionality in the minimal_mcp_server
-python -m mcp_testing.scripts.run_stdio_tests --server-command "../minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26 --debug
+# Test a filesystem server with dynamic adaptation (will only test tools the server actually provides)
+python -m mcp_testing.scripts.compliance_report \
+    --server-command "/path/to/filesystem/server" \
+    --args "/target/directory" \
+    --protocol-version 2024-11-05 \
+    --skip-shutdown \
+    --dynamic-only
 ```
 
 ## Extending the Framework

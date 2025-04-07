@@ -10,7 +10,7 @@ from datetime import datetime
 import os
 
 
-def generate_markdown_report(results: Dict[str, Any], server_command: str, protocol_version: str) -> str:
+def generate_markdown_report(results: Dict[str, Any], server_command: str, protocol_version: str, server_config: Dict[str, Any] = None) -> str:
     """
     Generate a Markdown compliance report.
     
@@ -18,6 +18,7 @@ def generate_markdown_report(results: Dict[str, Any], server_command: str, proto
         results: The test results dictionary
         server_command: The command used to start the server
         protocol_version: The protocol version used for testing
+        server_config: Optional server configuration dictionary
         
     Returns:
         A string containing the Markdown report
@@ -39,13 +40,23 @@ def generate_markdown_report(results: Dict[str, Any], server_command: str, proto
         f"- **Protocol Version**: {protocol_version}",
         f"- **Test Date**: {date_str}",
         f"",
+    ]
+    
+    # Add server config info if provided
+    if server_config:
+        report.append("## Server Configuration\n")
+        for key, value in server_config.items():
+            report.append(f"- **{key}**: {value}")
+        report.append("")
+    
+    report.extend([
         f"## Summary",
         f"",
         f"- **Total Tests**: {results['total']}",
         f"- **Passed**: {results['passed']} ({round(results['passed'] / results['total'] * 100, 1)}%)",
         f"- **Failed**: {results['failed']} ({round(results['failed'] / results['total'] * 100, 1)}%)",
         f"",
-    ]
+    ])
     
     # Add compliance badge
     if results['failed'] == 0:
@@ -199,7 +210,7 @@ def save_markdown_report(report: str, output_file: str = None) -> str:
     return output_path
 
 
-def results_to_markdown(results: Dict[str, Any], server_command: str, protocol_version: str, output_file: str = None) -> str:
+def results_to_markdown(results: Dict[str, Any], server_command: str, protocol_version: str, output_file: str = None, server_config: Dict[str, Any] = None) -> str:
     """
     Generate and save a Markdown compliance report from test results.
     
@@ -208,9 +219,10 @@ def results_to_markdown(results: Dict[str, Any], server_command: str, protocol_v
         server_command: The command used to start the server
         protocol_version: The protocol version used for testing
         output_file: The filename to save to (if None, a default name will be generated)
+        server_config: Optional server configuration dictionary
         
     Returns:
         The path to the saved file
     """
-    report = generate_markdown_report(results, server_command, protocol_version)
+    report = generate_markdown_report(results, server_command, protocol_version, server_config)
     return save_markdown_report(report, output_file) 

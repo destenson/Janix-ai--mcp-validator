@@ -88,9 +88,25 @@ class MCPTestRunner:
             # Run the test
             passed, message = await test_func(protocol_adapter)
             
-            # Shutdown the connection
-            await protocol_adapter.shutdown()
-            await protocol_adapter.exit()
+            # Shutdown the connection if not explicitly skipped
+            skip_shutdown = env_vars and env_vars.get("MCP_SKIP_SHUTDOWN", "").lower() in ("true", "1", "yes")
+            if not skip_shutdown:
+                try:
+                    await protocol_adapter.shutdown()
+                    await protocol_adapter.exit()
+                except Exception as e:
+                    if self.debug:
+                        print(f"Warning: Shutdown failed: {str(e)}")
+                    # Don't fail the test if shutdown is skipped but still fails
+                    if not skip_shutdown:
+                        raise
+            else:
+                # Just exit without shutdown if shutdown is skipped
+                try:
+                    await protocol_adapter.exit()
+                except Exception as e:
+                    if self.debug:
+                        print(f"Warning: Exit notification failed: {str(e)}")
             
             end_time = time.time()
             duration = end_time - start_time
