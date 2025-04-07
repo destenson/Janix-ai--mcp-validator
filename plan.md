@@ -203,3 +203,43 @@ The minimal_mcp_server has been successfully implemented and tested to:
 ## 7. Conclusion
 
 The testing suite has provided a comprehensive framework for testing MCP server implementations against both protocol specifications using the STDIO transport mechanism. The implementation of minimal_mcp_server serves as a complete reference implementation that correctly implements all aspects of the protocol, including the async tools functionality in the 2025-03-26 version. Future work will focus on extending support to HTTP transport and creating more advanced visualization tools for test results. 
+
+## 8. Implementation Challenges
+
+During the development of the testing framework, we've encountered a few challenges that required temporary workarounds:
+
+### 8.1 Temporarily Disabled Tests
+
+#### 8.1.1 Parallel Requests Test
+The `test_parallel_requests` test is currently disabled in the test suite due to implementation challenges with the asynchronous execution model:
+
+- **Goal**: Verify that servers can handle multiple concurrent requests correctly and maintain request/response correspondence.
+- **Challenge**: The current transport adapter implementation's `send_request` method is synchronous, which doesn't integrate well with Python's async/await model when trying to simulate concurrent requests.
+- **Current Status**: The test is commented out in the `TEST_CASES` list in `specification_coverage.py`.
+- **Future Solution**: Refactoring the transport layer to better support true concurrent operations, potentially by implementing a fully non-blocking I/O approach or moving the transport handling to a separate thread/process.
+
+#### 8.1.2 Shutdown Sequence Test
+The `test_shutdown_sequence` test is temporarily disabled due to its impact on the test runner:
+
+- **Goal**: Verify that servers properly handle the shutdown sequence and terminate cleanly.
+- **Challenge**: When the server shuts down in response to the shutdown method, it terminates the connection, which disrupts the test runner's ability to continue communication or verify results.
+- **Current Status**: The test is commented out in the `TEST_CASES` list in `specification_coverage.py`.
+- **Workaround**: The `--skip-shutdown` flag can be used when running compliance tests against servers.
+- **Future Solution**: Modify the test runner to handle disconnections more gracefully, or implement a more sophisticated approach that can verify server behavior after shutdown without requiring continued communication.
+
+### 8.2 Implications for Server Implementations
+
+Despite these tests being disabled in the automated test suite, server implementations should still:
+
+1. **Handle Concurrent Requests**: Servers should be designed to handle multiple concurrent requests, properly maintaining the correspondence between requests and responses.
+2. **Implement Proper Shutdown**: Servers should correctly implement the shutdown sequence as specified in the protocol, ensuring clean termination and resource cleanup.
+
+### 8.3 Future Work
+
+Addressing these challenges is part of our future roadmap:
+
+1. Enhance the transport layer to support true concurrency for parallel request testing
+2. Improve the test runner's handling of disconnections for shutdown sequence testing
+3. Consider implementing more sophisticated monitoring approaches that can verify post-shutdown behavior
+
+## 9. Conclusion 

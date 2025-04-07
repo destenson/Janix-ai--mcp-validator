@@ -18,6 +18,7 @@ The framework includes comprehensive test coverage for all protocol features, in
 - Asynchronous tool calls (for 2025-03-26)
 - Resources management
 - Prompt/completion functionality
+- Specification compliance (MUST, SHOULD, MAY requirements)
 
 ## Components
 
@@ -46,6 +47,7 @@ The `tests` module contains test cases for various protocol features:
   - `test_async_tools.py`: Standard tests for asynchronous tool calls
   - `dynamic_tool_tester.py`: Dynamic tests that adapt to any server's tool capabilities
   - `dynamic_async_tools.py`: Dynamic tests for async tool functionality
+- `specification_coverage.py`: Tests that verify compliance with MUST, SHOULD, and MAY requirements from the specification
 
 ### Utils
 
@@ -81,6 +83,9 @@ python -m mcp_testing.scripts.compliance_report --server-command "/path/to/serve
 
 # Passing additional arguments to the server
 python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --args "/path/to/directory" --protocol-version 2025-03-26
+
+# Running only specification compliance tests
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --spec-coverage-only --protocol-version 2025-03-26
 ```
 
 #### Options for Compliance Testing
@@ -92,7 +97,8 @@ python -m mcp_testing.scripts.compliance_report --server-command "/path/to/serve
 - `--skip-shutdown`: Skip the shutdown method (for servers that don't implement it)
 - `--skip-async`: Skip async tool tests (for 2025-03-26)
 - `--skip-tests`: Comma-separated list of test names to skip
-- `--test-mode`: Testing mode (all, core, tools, async)
+- `--test-mode`: Testing mode (all, core, tools, async, spec)
+- `--spec-coverage-only`: Only run specification coverage tests
 - `--debug`: Enable debug output
 - `--json`: Generate a JSON report in addition to Markdown
 - `--output-dir`: Directory to store the report files
@@ -112,6 +118,76 @@ python -m mcp_testing.scripts.compliance_report \
     --dynamic-only
 ```
 
+### Protocol Specification Coverage
+
+The testing framework now includes specific tests for the MUST, SHOULD, and MAY requirements from the MCP specification. This provides a comprehensive check of a server's compliance with the official protocol requirements.
+
+```bash
+# Run all tests including specification coverage
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --protocol-version 2025-03-26
+
+# Run only specification coverage tests
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --spec-coverage-only --protocol-version 2025-03-26
+
+# Run a subset of tests plus specification coverage
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-mode spec --protocol-version 2025-03-26
+```
+
+The generated compliance report will include a section showing how well the server meets the specification requirements, broken down by MUST, SHOULD, and MAY categories:
+
+```
+## Specification Coverage
+
+This report includes tests for requirements from the 2025-03-26 protocol specification.
+
+| Requirement Type | Tested | Total | Coverage |
+|-----------------|--------|-------|----------|
+| **MUST** | 35 | 65 | 53.8% |
+| **SHOULD** | 8 | 16 | 50.0% |
+| **MAY** | 6 | 21 | 28.6% |
+| **TOTAL** | 49 | 102 | 48.0% |
+```
+
+## Known Issues
+
+The framework currently has two tests that are temporarily disabled due to implementation challenges:
+
+### 1. Parallel Requests Test (`test_parallel_requests`)
+
+**Issue**: This test attempts to verify that servers can handle multiple concurrent requests, but it's currently disabled due to implementation issues with asynchronous execution in the test framework.
+
+**Details**: 
+- The test tries to send multiple requests simultaneously and verify that responses match their corresponding requests.
+- Current implementation challenges involve the synchronous nature of the `transport.send_request` method which doesn't work well with Python's async execution model.
+- A more robust implementation would require modifications to the transport layer to properly support concurrent operations.
+
+**Workaround**: 
+- For now, this test is commented out in the `TEST_CASES` list in `specification_coverage.py`.
+- Servers should still be designed to handle concurrent requests even though this test is currently disabled.
+
+### 2. Shutdown Sequence Test (`test_shutdown_sequence`)
+
+**Issue**: This test is temporarily disabled due to incompatibility with the test runner.
+
+**Details**:
+- The test attempts to verify that servers correctly handle the shutdown sequence.
+- When the server shuts down during the test, it terminates the connection, which causes issues with the test runner's expectation of continuous communication.
+- This makes it difficult to verify the server's behavior after a shutdown command is sent.
+
+**Workaround**:
+- The test is commented out in the `TEST_CASES` list in `specification_coverage.py`.
+- Use the `--skip-shutdown` flag when running compliance tests against servers that don't handle the shutdown method or when you want to avoid this issue.
+- In real-world scenarios, proper shutdown sequence handling should still be implemented.
+
+### Future Improvements
+
+We plan to address these issues in future updates by:
+1. Refactoring the transport layer to better support concurrent operations.
+2. Modifying the test runner to handle server disconnections more gracefully.
+3. Implementing a more robust approach to testing shutdown sequences without disrupting the test runner.
+
+Contributions to fix these issues are welcome!
+
 ## Extending the Framework
 
 ### Adding New Tests
@@ -124,6 +200,12 @@ python -m mcp_testing.scripts.compliance_report \
        return True, "Test passed"
    ```
 3. Add the test to the `TEST_CASES` list at the end of the file
+
+### Adding Specification Coverage Tests
+
+1. Identify requirements from the specification (MUST, SHOULD, MAY statements)
+2. Implement a test for each requirement following the pattern in `specification_coverage.py`
+3. Update the `get_specification_coverage` function with accurate counts of tested requirements
 
 ### Supporting New Protocol Versions
 

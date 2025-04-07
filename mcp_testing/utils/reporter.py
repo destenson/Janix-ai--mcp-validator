@@ -9,6 +9,29 @@ import json
 from datetime import datetime
 import os
 
+# Import the specification coverage metrics
+try:
+    from mcp_testing.tests.specification_coverage import get_specification_coverage
+except ImportError:
+    # Define a fallback if the module is not available
+    def get_specification_coverage(version: str, test_mode: str = "spec") -> Dict[str, Dict[str, Any]]:
+        """Fallback function if the specification_coverage module is not available."""
+        coverage = {}
+        for req_type in ["must", "should", "may"]:
+            coverage[req_type] = {
+                "total": 0,
+                "covered": 0,
+                "percentage": 0,
+                "required": req_type == "must" or test_mode == "spec"
+            }
+        coverage["all"] = {
+            "total": 0,
+            "covered": 0,
+            "percentage": 0,
+            "required": True
+        }
+        return coverage
+
 
 def generate_markdown_report(results: Dict[str, Any], server_command: str, protocol_version: str, server_config: Dict[str, Any] = None) -> str:
     """
@@ -66,8 +89,48 @@ def generate_markdown_report(results: Dict[str, Any], server_command: str, proto
     else:
         report.append(f"**Compliance Status**: ❌ Non-Compliant ({round(results['passed'] / results['total'] * 100, 1)}%)")
     
+    # Add specification coverage section
+    coverage = get_specification_coverage(protocol_version, "spec")
+    if coverage:
+        report.extend([
+            f"",
+            f"## Specification Coverage",
+            f"",
+            f"This report includes tests for requirements from the {protocol_version} protocol specification.",
+            f"",
+        ])
+        
+        # Add coverage table
+        report.append("| Requirement Type | Tested | Total | Coverage |")
+        report.append("|-----------------|--------|-------|----------|")
+        
+        # MUST requirements
+        must_tested = coverage["must"]["covered"]
+        must_total = coverage["must"]["total"]
+        must_pct = coverage["must"]["percentage"]
+        report.append(f"| **MUST** | {must_tested} | {must_total} | {must_pct}% |")
+        
+        # SHOULD requirements
+        should_tested = coverage["should"]["covered"]
+        should_total = coverage["should"]["total"]
+        should_pct = coverage["should"]["percentage"]
+        report.append(f"| **SHOULD** | {should_tested} | {should_total} | {should_pct}% |")
+        
+        # MAY requirements
+        may_tested = coverage["may"]["covered"]
+        may_total = coverage["may"]["total"]
+        may_pct = coverage["may"]["percentage"]
+        report.append(f"| **MAY** | {may_tested} | {may_total} | {may_pct}% |")
+        
+        # Total requirements
+        total_tested = coverage["all"]["covered"]
+        total_reqs = coverage["all"]["total"]
+        total_pct = coverage["all"]["percentage"]
+        report.append(f"| **TOTAL** | {total_tested} | {total_reqs} | {total_pct}% |")
+        
+        report.append("")
+    
     report.extend([
-        f"",
         f"## Detailed Results",
         f"",
         f"### Passed Tests",

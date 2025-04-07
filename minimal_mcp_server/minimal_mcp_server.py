@@ -837,6 +837,8 @@ class MinimalMCPServer:
         for resource_id, resource in self.resources.items():
             resources_list.append({
                 "id": resource_id,
+                "uri": f"mcp://resources/{resource_id}",
+                "name": resource.get("data", {}).get("name", f"Resource {resource_id}"),
                 "type": resource["type"],
                 "createdAt": resource["createdAt"]
             })
@@ -854,6 +856,8 @@ class MinimalMCPServer:
             }
             resources_list.append({
                 "id": sample_id,
+                "uri": f"mcp://resources/{sample_id}",
+                "name": "Sample Document",
                 "type": "document",
                 "createdAt": self.resources[sample_id]["createdAt"]
             })
@@ -880,14 +884,24 @@ class MinimalMCPServer:
             
         resource_id = params["id"]
         
+        # Handle URI format (mcp://resources/id)
+        if resource_id.startswith("mcp://resources/"):
+            resource_id = resource_id.replace("mcp://resources/", "")
+        
         # Check if the resource exists
         if resource_id in self.resources:
             resource = self.resources[resource_id]
             return {
                 "id": resource_id,
+                "uri": f"mcp://resources/{resource_id}",
+                "name": resource.get("data", {}).get("name", f"Resource {resource_id}"),
                 "type": resource["type"],
                 "data": resource["data"],
-                "createdAt": resource["createdAt"]
+                "createdAt": resource["createdAt"],
+                "contents": [{
+                    "uri": f"mcp://resources/{resource_id}/content",
+                    "text": resource.get("data", {}).get("content", "")
+                }]
             }
         # Handle the sample resource for backward compatibility
         elif resource_id == "sample-doc":
@@ -903,9 +917,15 @@ class MinimalMCPServer:
             resource = self.resources[sample_id]
             return {
                 "id": sample_id,
+                "uri": f"mcp://resources/{sample_id}",
+                "name": "Sample Document",
                 "type": resource["type"],
                 "data": resource["data"],
-                "createdAt": resource["createdAt"]
+                "createdAt": resource["createdAt"],
+                "contents": [{
+                    "uri": f"mcp://resources/{sample_id}/content",
+                    "text": "This is a sample document for testing."
+                }]
             }
         else:
             raise InvalidParamsError(f"Resource not found: {resource_id}")

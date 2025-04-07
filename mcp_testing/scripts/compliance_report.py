@@ -24,6 +24,7 @@ from mcp_testing.tests.features.test_tools import TEST_CASES as TOOLS_TEST_CASES
 from mcp_testing.tests.features.test_async_tools import TEST_CASES as ASYNC_TOOLS_TEST_CASES
 from mcp_testing.tests.features.dynamic_tool_tester import TEST_CASES as DYNAMIC_TOOL_TEST_CASES
 from mcp_testing.tests.features.dynamic_async_tools import TEST_CASES as DYNAMIC_ASYNC_TEST_CASES
+from mcp_testing.tests.specification_coverage import TEST_CASES as SPEC_COVERAGE_TEST_CASES
 
 
 async def main():
@@ -49,8 +50,9 @@ async def main():
     parser.add_argument("--required-tools", help="Comma-separated list of tools that must be available")
     parser.add_argument("--skip-tests", help="Comma-separated list of test names to skip")
     parser.add_argument("--dynamic-only", action="store_true", help="Only run dynamic tests that adapt to the server's capabilities")
-    parser.add_argument("--test-mode", choices=["all", "core", "tools", "async"], default="all", 
-                        help="Testing mode: 'all' runs all tests, 'core' runs only initialization tests, 'tools' runs core and tools tests, 'async' runs async tests")
+    parser.add_argument("--test-mode", choices=["all", "core", "tools", "async", "spec"], default="all", 
+                        help="Testing mode: 'all' runs all tests, 'core' runs only initialization tests, 'tools' runs core and tools tests, 'async' runs async tests, 'spec' runs specification coverage tests")
+    parser.add_argument("--spec-coverage-only", action="store_true", help="Only run specification coverage tests")
     
     args = parser.parse_args()
     
@@ -107,37 +109,48 @@ async def main():
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    # Collect test cases based on test mode and dynamic flag
+    # Collect test cases based on test mode and flags
     all_tests = []
     
-    # Always add initialization tests regardless of mode
-    init_tests = [(func, name) for func, name in INIT_TEST_CASES if name not in skip_tests]
-    all_tests.extend(init_tests)
-    
-    if args.dynamic_only:
-        # Only use dynamic tests when in dynamic-only mode
-        print("Running in dynamic-only mode - tests will adapt to the server's capabilities")
-        
-        # Add dynamic tool tests
-        if args.test_mode in ["all", "tools"]:
-            all_tests.extend([(func, name) for func, name in DYNAMIC_TOOL_TEST_CASES if name not in skip_tests])
-        
-        # Include dynamic async tests for 2025-03-26 if not skipped
-        if args.protocol_version == "2025-03-26" and not args.skip_async and args.test_mode in ["all", "async"]:
-            all_tests.extend([(func, name) for func, name in DYNAMIC_ASYNC_TEST_CASES if name not in skip_tests])
+    # If spec-coverage-only is set, only run specification coverage tests
+    if args.spec_coverage_only:
+        print("Running only specification coverage tests")
+        spec_tests = [(func, name) for func, name in SPEC_COVERAGE_TEST_CASES if name not in skip_tests]
+        all_tests.extend(spec_tests)
     else:
-        # Use a mix of traditional and dynamic tests
-        if args.test_mode in ["all", "tools"]:
-            # Add tools tests (filtering out skipped ones)
-            all_tests.extend([(func, name) for func, name in TOOLS_TEST_CASES if name not in skip_tests])
+        # Always add initialization tests regardless of mode
+        init_tests = [(func, name) for func, name in INIT_TEST_CASES if name not in skip_tests]
+        all_tests.extend(init_tests)
+    
+        # Add specification coverage tests if mode is all or spec
+        if args.test_mode in ["all", "spec"]:
+            spec_tests = [(func, name) for func, name in SPEC_COVERAGE_TEST_CASES if name not in skip_tests]
+            all_tests.extend(spec_tests)
+        
+        if args.dynamic_only:
+            # Only use dynamic tests when in dynamic-only mode
+            print("Running in dynamic-only mode - tests will adapt to the server's capabilities")
             
             # Add dynamic tool tests
-            all_tests.extend([(func, name) for func, name in DYNAMIC_TOOL_TEST_CASES if name not in skip_tests])
-        
-        # Include async tool tests for 2025-03-26 if not skipped
-        if args.protocol_version == "2025-03-26" and not args.skip_async and args.test_mode in ["all", "async"]:
-            all_tests.extend([(func, name) for func, name in ASYNC_TOOLS_TEST_CASES if name not in skip_tests])
-            all_tests.extend([(func, name) for func, name in DYNAMIC_ASYNC_TEST_CASES if name not in skip_tests])
+            if args.test_mode in ["all", "tools"]:
+                all_tests.extend([(func, name) for func, name in DYNAMIC_TOOL_TEST_CASES if name not in skip_tests])
+            
+            # Include dynamic async tests for 2025-03-26 if not skipped
+            if args.protocol_version == "2025-03-26" and not args.skip_async and args.test_mode in ["all", "async"]:
+                all_tests.extend([(func, name) for func, name in DYNAMIC_ASYNC_TEST_CASES if name not in skip_tests])
+        else:
+            # Use a mix of traditional and dynamic tests
+            if args.test_mode in ["all", "tools"]:
+                # Add tools tests (filtering out skipped ones)
+                all_tests.extend([(func, name) for func, name in TOOLS_TEST_CASES if name not in skip_tests])
+                
+                # Add dynamic tool tests
+                all_tests.extend([(func, name) for func, name in DYNAMIC_TOOL_TEST_CASES if name not in skip_tests])
+            
+            # Include async tool tests for 2025-03-26 if not skipped
+            if args.protocol_version == "2025-03-26" and not args.skip_async and args.test_mode in ["all", "async"]:
+                all_tests.extend([(func, name) for func, name in ASYNC_TOOLS_TEST_CASES if name not in skip_tests])
+                all_tests.extend([(func, name) for func, name in DYNAMIC_ASYNC_TEST_CASES if name not in skip_tests])
     
     print(f"Running compliance tests for protocol {args.protocol_version}...")
     print(f"Server command: {full_server_command}")

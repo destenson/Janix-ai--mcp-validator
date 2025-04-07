@@ -52,6 +52,7 @@ A flexible testing framework for verifying MCP server compliance with protocol s
 - Dynamic tool testing that adapts to any server's capabilities
 - Detailed compliance reporting
 - Configurable test modes for targeted functionality testing
+- Comprehensive specification requirement testing (MUST, SHOULD, MAY)
 
 ### Running Compliance Tests
 
@@ -64,6 +65,9 @@ python -m mcp_testing.scripts.compliance_report --server-command "/path/to/serve
 
 # Test a specialized server that doesn't implement standard tools or shutdown method
 python -m mcp_testing.scripts.compliance_report --server-command "/path/to/specialized/server" --args "/path/to/directory" --skip-shutdown --dynamic-only --protocol-version 2024-11-05
+
+# Run only specification requirement tests (MUST, SHOULD, MAY)
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --spec-coverage-only --protocol-version 2025-03-26
 ```
 
 ### Generating Compliance Reports
@@ -75,6 +79,8 @@ The framework generates detailed Markdown reports:
 python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26 --output-dir "./reports"
 ```
 
+Reports now include a section on specification coverage, showing how well the server implements all MUST, SHOULD, and MAY requirements from the official protocol specification.
+
 ## Extensions and Customization
 
 The framework is designed to be extended:
@@ -82,6 +88,7 @@ The framework is designed to be extended:
 - Add new test cases for additional protocol features
 - Support new protocol versions as they are released
 - Create custom test adaptations for specialized server implementations
+- Contribute tests for uncovered specification requirements
 
 See the [MCP Testing README](mcp_testing/README.md) for detailed information.
 
