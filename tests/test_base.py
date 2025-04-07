@@ -113,9 +113,35 @@ class MCPBaseTest:
                 return response
             except Exception as e:
                 raise ConnectionError(f"Failed to send request: {e}")
+        elif MCP_TRANSPORT_TYPE == "stdio":
+            # Use STDIOTransport for STDIO transport
+            try:
+                from transport.stdio_client import STDIOTransport
+                
+                # Create or reuse a transport instance
+                if not hasattr(self, 'stdio_transport'):
+                    # Create a new transport
+                    server_command = os.environ.get("MCP_SERVER_COMMAND", "")
+                    if not server_command:
+                        raise ValueError("MCP_SERVER_COMMAND environment variable not set")
+                    
+                    self.stdio_transport = STDIOTransport(
+                        command=server_command,
+                        debug=MCP_DEBUG,
+                        timeout=int(os.environ.get("MCP_TIMEOUT", "30"))
+                    )
+                    self.stdio_transport.start()
+                
+                # Send the request
+                response = self.stdio_transport.send_request(request_data)
+                
+                # Create a mock response to maintain the API
+                mock_response = MockResponse(200, response)
+                return mock_response
+            except Exception as e:
+                raise ConnectionError(f"Failed to send request: {e}")
         else:
-            # For other transport types, this would be implemented differently
-            # This is a simplified mock response for now
+            # For other transport types, return a mock response
             mock_response = MockResponse(200, {"result": {}})
             return mock_response
     

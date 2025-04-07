@@ -146,7 +146,8 @@ This repository includes a simple test script that validates the server's functi
 The server can be tested with the official MCP Protocol Validator:
 
 ```bash
-./run_validator.py --transport stdio --server-command "./minimal_mcp_server.py" --protocol-version 2024-11-05
+# From the validator directory
+./run_validator.py --transport stdio --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2024-11-05
 ```
 
 ## Protocol Support Matrix
@@ -166,24 +167,11 @@ The server can be tested with the official MCP Protocol Validator:
 - The protocol version can be set via the `MCP_PROTOCOL_VERSION` environment variable
 - Debug mode can be enabled via the `MCP_DEBUG` environment variable
 
+## Files
+
+- `minimal_mcp_server.py` - The main server implementation
+- `test_minimal_server.py` - Test script to validate server functionality
+
 ## License
 
 This project is licensed under the AGPL-3.0-or-later license.
-
-## Minimal MCP STDIO Server
-
-This repository includes a minimal reference implementation of an MCP server using the STDIO transport:
-
-- Located in the `minimal_mcp_stdio_server` directory
-- Fully compliant with both protocol versions: `2024-11-05` and `2025-03-26`
-- Implements all core protocol methods, tools, resources, and batch requests
-- Includes comprehensive testing scripts and documentation
-
-To run tests with the minimal STDIO server:
-
-```bash
-cd minimal_mcp_stdio_server
-./run_tests.sh 2024-11-05 basic  # Run basic tests with protocol version 2024-11-05
-```
-
-For more details, see the [Minimal MCP STDIO Server README](./minimal_mcp_stdio_server/README.md).
