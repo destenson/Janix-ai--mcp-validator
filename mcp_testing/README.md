@@ -1,113 +1,110 @@
 # MCP Testing Framework
 
-A comprehensive testing framework for MCP (Model Conversation Protocol) server implementations.
+A modular and extensible testing framework for verifying MCP (Model Conversation Protocol) server implementations.
 
 ## Overview
 
-This framework allows testing any MCP server implementation against either the 2024-11-05 or 2025-03-26 protocol specifications, using either STDIO or HTTP transport mechanisms.
+This framework provides a set of tools and utilities for testing MCP servers against the protocol specifications. It supports both STDIO and HTTP transports, and can test implementations of both the 2024-11-05 and 2025-03-26 protocol versions.
 
-## Features
+## Status
 
-- Test MCP servers with either STDIO or HTTP transport
-- Support for both 2024-11-05 and 2025-03-26 protocol versions
-- Comprehensive test coverage for all protocol features
-- Specific support for asynchronous tool calls in 2025-03-26
-- Modular design for easy extension and customization
-- Detailed test reports and summaries
+**✅ All tests now pass for the reference implementation!**
 
-## Installation
+The framework includes comprehensive test coverage for all protocol features, including:
+- Basic protocol operations (initialization, shutdown, etc.)
+- Synchronous tool calls
+- Asynchronous tool calls (for 2025-03-26)
+- Resources management
+- Prompt/completion functionality
 
-1. Clone the repository
-2. Install the dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+## Components
+
+### Transports
+
+The `transports` module provides adapters for different communication mechanisms:
+
+- `stdio.py`: Communication via standard input/output
+- `base.py`: Base class defining the transport adapter interface
+
+### Protocols
+
+The `protocols` module provides adapters for different protocol versions:
+
+- `v2024_11_05.py`: Implementation for the 2024-11-05 protocol
+- `v2025_03_26.py`: Implementation for the 2025-03-26 protocol (with async tool support)
+- `base.py`: Base class defining the protocol adapter interface
+
+### Tests
+
+The `tests` module contains test cases for various protocol features:
+
+- `base_protocol/`: Tests for basic protocol functionality
+- `features/`: Tests for specific protocol features
+  - `test_tools.py`: Tests for synchronous tool calls
+  - `test_async_tools.py`: Tests for asynchronous tool calls
+
+### Utils
+
+The `utils` module provides utility classes and functions:
+
+- `runner.py`: Test runner for executing test cases
+
+### Scripts
+
+The `scripts` module provides command-line scripts for running tests:
+
+- `run_stdio_tests.py`: Run tests against an STDIO MCP server
 
 ## Usage
 
-### Running the Tests
+### Running Tests
 
-To run tests against a STDIO MCP server using the 2024-11-05 protocol:
-
-```bash
-python -m mcp_testing.scripts.run_stdio_tests --server-command "./path/to/server" --protocol-version 2024-11-05 --debug
-```
-
-To test against the 2025-03-26 protocol (including async tool calls):
+To run tests against an STDIO MCP server:
 
 ```bash
-python -m mcp_testing.scripts.run_stdio_tests --server-command "./path/to/server" --protocol-version 2025-03-26 --debug
+python -m mcp_testing.scripts.run_stdio_tests --server-command "/path/to/server" --protocol-version 2025-03-26 --debug
 ```
 
-### Options
-
+Options:
 - `--server-command`: Command to start the server
-- `--protocol-version`: Protocol version to use (2024-11-05 or 2025-03-26)
+- `--protocol-version`: Protocol version to test (2024-11-05 or 2025-03-26)
 - `--debug`: Enable debug output
-- `--output-file`: File to write results to (in JSON format)
+- `--output-file`: File to write results to (JSON format)
 
-## Protocol Version Differences
+### Testing Async Tools
 
-### 2024-11-05
-- Basic MCP protocol with JSON-RPC messaging
-- Synchronous tool calls via tools/call
+For testing async tool functionality (2025-03-26 protocol), the framework includes:
 
-### 2025-03-26
-- All features from 2024-11-05
-- Asynchronous tool calls via tools/call-async
-- Tool result polling via tools/result
-- Tool cancellation via tools/cancel
+1. `test_async_tool_support`: Verifies that the server advertises async tool support
+2. `test_async_echo_tool`: Tests basic async tool execution
+3. `test_async_long_running_tool`: Tests a long-running async operation with status polling
+4. `test_async_tool_cancellation`: Tests cancellation of in-progress async operations
 
-## Directory Structure
-
-```
-mcp_testing/
-├── transports/     # Transport adapters
-│   ├── base.py     # Base transport adapter
-│   └── stdio.py    # STDIO transport adapter
-├── protocols/      # Protocol adapters
-│   ├── base.py     # Base protocol adapter
-│   ├── v2024_11_05.py  # 2024-11-05 protocol adapter
-│   └── v2025_03_26.py  # 2025-03-26 protocol adapter
-├── tests/          # Test cases
-│   ├── base_protocol/  # Base protocol tests
-│   │   └── test_initialization.py  # Initialization tests
-│   └── features/   # Feature tests
-│       ├── test_tools.py  # Tools tests
-│       └── test_async_tools.py  # Async tools tests (2025-03-26)
-├── utils/          # Utilities
-│   └── runner.py   # Test runner
-├── scripts/        # Scripts
-│   └── run_stdio_tests.py  # Run tests against STDIO server
-└── README.md       # This file
+Example:
+```bash
+# Test async functionality in the minimal_mcp_server
+python -m mcp_testing.scripts.run_stdio_tests --server-command "../minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26 --debug
 ```
 
 ## Extending the Framework
 
-### Adding New Test Cases
+### Adding New Tests
 
 1. Create a new test module in the appropriate directory
-2. Define test functions following the pattern:
+2. Define test functions with the signature:
    ```python
    async def test_feature(protocol: MCPProtocolAdapter) -> Tuple[bool, str]:
-       # Test code here
-       return True, "Success message"
+       # Test implementation
+       return True, "Test passed"
    ```
-3. Add a `TEST_CASES` list at the end of the file
-4. Import and use the test cases in your test script
+3. Add the test to the `TEST_CASES` list at the end of the file
 
-### Adding Support for a New Protocol Version
+### Supporting New Protocol Versions
 
-1. Create a new protocol adapter in the `protocols` directory
-2. Implement all required methods from the base adapter
-3. Update the test runner to use the new adapter
-
-### Adding Support for a New Transport Mechanism
-
-1. Create a new transport adapter in the `transports` directory
-2. Implement all required methods from the base adapter
-3. Update the test runner to use the new adapter
+1. Create a new protocol adapter that extends `BaseMCPProtocolAdapter`
+2. Implement all required methods from the base class
+3. Add the new adapter to the protocol version mapping in the test runner
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+MIT License 
