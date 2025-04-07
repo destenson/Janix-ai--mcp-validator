@@ -6,6 +6,12 @@ import json
 import time
 import threading
 
+# DEPRECATION WARNING: This script is part of the legacy test framework.
+# It is maintained for backward compatibility but will be removed in a future release.
+# Please use the new unified test framework in the tests/ directory instead.
+# See docs/legacy_tests.md for more information.
+
+
 def main():
     print("MCP STDIO TEST STARTING")
 

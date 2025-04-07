@@ -186,9 +186,10 @@ def compare_versions():
     # Run tests for first protocol version
     print(f"\nTesting with protocol version: {PROTOCOL_VERSION_1}")
     cmd1 = [
-        "python", "stdio_docker_test.py",
+        "python", "run_validator.py",
         "--protocol-version", PROTOCOL_VERSION_1,
-        "--mount-dir", TEST_DATA_PATH
+        "--transport", "docker",
+        "--test-data-dir", TEST_DATA_PATH
     ]
     proc1 = subprocess.run(cmd1, capture_output=True, text=True)
     output1 = proc1.stdout + proc1.stderr
@@ -197,9 +198,10 @@ def compare_versions():
     # Run tests for second protocol version
     print(f"\nTesting with protocol version: {PROTOCOL_VERSION_2}")
     cmd2 = [
-        "python", "stdio_docker_test.py",
+        "python", "run_validator.py",
         "--protocol-version", PROTOCOL_VERSION_2,
-        "--mount-dir", TEST_DATA_PATH
+        "--transport", "docker",
+        "--test-data-dir", TEST_DATA_PATH
     ]
     proc2 = subprocess.run(cmd2, capture_output=True, text=True)
     output2 = proc2.stdout + proc2.stderr

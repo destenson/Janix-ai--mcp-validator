@@ -1,0 +1,24 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create directories for test files
+RUN mkdir -p /projects/files
+
+# Copy the server code
+COPY docker/http_server.py /app/
+
+# Set environment variables
+ENV MCP_PROTOCOL_VERSION=2025-03-26
+ENV MCP_TRANSPORT=http
+ENV PORT=8080
+
+# Expose the HTTP port
+EXPOSE 8080
+
+# Run the server
+CMD ["python", "http_server.py"] 

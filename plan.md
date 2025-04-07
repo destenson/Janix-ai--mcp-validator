@@ -1,200 +1,185 @@
-# MCP Protocol Validator Enhancement Plan
+# MCP Protocol Validator Plan
 
 ## Objective
-Create a unified, flexible testing framework for MCP servers that supports:
-- Both STDIO and HTTP transport protocols
-- Multiple protocol versions (2024-11-05 and 2025-03-26)
-- Comprehensive test coverage for all MCP features
-- Easy configuration and execution
+Create a unified testing framework for MCP servers that:
+- Supports both STDIO and HTTP transport protocols
+- Tests multiple protocol versions
+- Provides comprehensive test coverage for all protocol features
+- Has clear, consistent test organization
+- Enables easy configuration and execution
 
 ## Current Challenges
-1. Inconsistent handling of STDIO vs HTTP testing
-2. Multiple overlapping test scripts with different approaches
-3. Lack of clear organization for protocol version testing
-4. Incomplete test coverage for some MCP features
-5. Confusing setup process for users
+- Inconsistent handling of multiple transport protocols (HTTP/STDIO)
+- Overlapping test scripts with duplicate functionality
+- Lack of clear organization for protocol version testing
+- Incomplete test coverage for protocol features
+- Confusing setup process for testing different servers
 
 ## Solution Architecture
+### Unified Transport Layer
+- Abstract MCP transport to support both STDIO and HTTP
+- Handle protocol-specific details in dedicated adapter classes
+- Provide a consistent interface for test cases
 
-### 1. Core Components
+### Protocol Version Support
+- Support multiple MCP protocol versions
+- Version-specific test cases and expectations
+- Clear comparison of differences between versions
 
-#### 1.1 Transport Layer
-- Create a unified transport interface with concrete implementations for:
-  - HTTP client (for testing HTTP servers)
-  - STDIO client (for testing servers using stdin/stdout)
-  - Docker STDIO client (for testing containerized servers)
+### Test Framework Organization
+- Structured test framework organized by feature categories
+- Shared test base class with common functionality
+- Skip logic for tests incompatible with certain protocol versions or transports
 
-#### 1.2 Protocol Version Support
-- Implement protocol version adapters for:
-  - 2024-11-05 (original specification)
-  - 2025-03-26 (with async support)
-  - Future versions as needed
-
-#### 1.3 Test Framework
-- Organize tests by feature categories:
-  - Base protocol (initialization, capabilities)
-  - Filesystem operations
-  - Tools functionality
-  - Resources management
-  - Prompts/completions
-  - Utilities (logging, progress, etc.)
-
-### 2. Command Line Interface
-
-#### 2.1 Primary Command
+## Command Line Interface
 ```
-python mcp_validator.py test [options]
+./run_validator.py 
+  --transport [http|stdio]
+  --server-command [command to start server]
+  --docker-image [image name]
+  --protocol-version [version]
+  --report [format]
 ```
 
-#### 2.2 Common Options
-- `--transport`: Specify HTTP or STDIO
-- `--url`: For HTTP servers
-- `--server-command`: For STDIO servers
-- `--docker-image`: For containerized servers
-- `--protocol-version`: Specify the protocol version to test against
-- `--test-modules`: Select specific test modules to run
-- `--mount-dir`: Specify directory to mount (for Docker)
-- `--report-format`: HTML or JSON output
-- `--debug`: Enable detailed logging
+## Implementation Plan
 
-#### 2.3 Version Comparison Tool
-```
-python mcp_validator.py compare --version1 2024-11-05 --version2 2025-03-26 [options]
-```
+### Phase 1: Core Architecture Refactoring (COMPLETED)
+- ✅ Refactor test framework to support multiple transport types
+- ✅ Create protocol version adapters
+- ✅ Implement Docker-based test server reference implementations
+- ✅ Add test skip logic for incompatible protocol/transport combinations
+- ✅ Add pytest markers for protocol versions and transport types
 
-### 3. Implementation Plan
+### Phase 2: Test Module Organization (COMPLETED)
+- ✅ Organize tests by protocol feature categories:
+  - ✅ tools.py (tool listing and execution)
+  - ✅ protocol_negotiation.py (version negotiation and capabilities)
+  - ✅ resources.py (resource management)
+  - ✅ prompts.py (prompt handling and completions)
+  - ✅ utilities.py (batch requests, error handling, etc.)
 
-#### Phase 1: Refactor Core Architecture (IN PROGRESS)
-1. ✅ Create a unified `MCPTransport` interface with transport-specific implementations
-   - ✅ Base abstract `MCPTransport` class
-   - ✅ `HTTPTransport` implementation
-   - ✅ `STDIOTransport` implementation
-   - ✅ `DockerSTDIOTransport` implementation
-   - ✅ Basic test script to verify implementations
-2. Refactor test base classes to use the client interface
-3. Implement protocol version adapters
-4. Create consistent configuration handling
+### Phase 3: Documentation & Integration (COMPLETED)
+- ✅ Update protocol version comparison documentation
+- ✅ Create user guide for validator
+- ✅ Document legacy test scripts
+- ✅ Create helper scripts for running tests
 
-#### Phase 2: Test Suite Organization
-1. Reorganize tests into logical feature modules
-2. Ensure tests are properly tagged for compatibility
-3. Implement test skip logic for incompatible combinations
-4. Add comprehensive protocol version negotiation tests
+### Phase 4: Future Work (PLANNED)
+- Integration with CI pipeline
+- Full testing with reference implementations
+- Support for additional protocol versions
+- Enhanced reporting features
+- Migration or removal of legacy test scripts
 
-#### Phase 3: CLI and Usability Improvements
-1. Implement unified command line interface
-2. Create comprehensive test reporting
-3. Add detailed error handling and diagnostics
-4. Update documentation with examples
-
-#### Phase 4: Docker Integration
-1. Improve Docker networking setup
-2. Add container health checking
-3. Support custom Docker images
-4. Add test file preparation utilities
-
-### 4. Directory Structure
-
+## Directory Structure
 ```
 mcp-protocol-validator/
-├── mcp_validator.py              # Main entry point
-├── compare_protocol_versions.py  # Version comparison tool
-├── schema/                       # JSON schemas for protocol versions
-│   ├── mcp_schema_2024-11-05.json
-│   └── mcp_schema_2025-03-26.json
-├── transport/                    # Transport implementations (COMPLETED)
-│   ├── __init__.py
-│   ├── base.py                   # Transport interface
-│   ├── http_client.py
-│   ├── stdio_client.py
-│   └── docker_client.py
-├── protocols/                    # Protocol version adapters
-│   ├── __init__.py
-│   ├── base.py
-│   ├── v2024_11_05.py
-│   └── v2025_03_26.py
-├── tests/                        # Test modules
-│   ├── __init__.py
-│   ├── conftest.py
-│   ├── test_base.py              # Base test utilities
-│   ├── test_base_protocol.py     # Basic protocol tests
-│   ├── test_filesystem.py        # Filesystem tests
-│   ├── test_tools.py             # Tools tests
-│   ├── test_resources.py         # Resources tests
-│   ├── test_prompts.py           # Prompts/completions tests
-│   └── test_utilities.py         # Utility tests
-├── docker/                       # Docker utilities
-│   ├── Dockerfile                # Test server Dockerfile
-│   └── docker_utils.py           # Docker helper functions
-└── utils/                        # Utility functions
-    ├── __init__.py
-    ├── config.py                 # Configuration handling
-    ├── report.py                 # Report generation
-    └── logging.py                # Logging utilities
+├── run_validator.py           # Main entry point
+├── run_all_tests.sh           # Script to run all tests
+├── tests/
+│   ├── conftest.py            # pytest configuration
+│   ├── test_base.py           # Base test class
+│   ├── test_tools.py          # Tool-related tests
+│   ├── test_protocol_negotiation.py # Protocol version tests
+│   ├── test_resources.py      # Resource management tests
+│   ├── test_prompts.py        # Prompt handling tests
+│   ├── test_utilities.py      # Misc utility tests
+│   └── transports/            # Transport adapters
+│       ├── transport_base.py  # Abstract base class
+│       ├── http_transport.py  # HTTP transport implementation
+│       └── stdio_transport.py # STDIO transport implementation
+├── docker/                    # Docker utilities
+│   ├── Dockerfile.http        # HTTP server test environment
+│   ├── Dockerfile.stdio       # STDIO server test environment
+│   ├── http_server.py         # HTTP server implementation
+│   ├── stdio_server.py        # STDIO server implementation
+│   └── build_test_servers.sh  # Script to build Docker images
+├── utils/                     # Utility functions
+│   ├── protocol_adapter.py    # Protocol version specific handling
+│   └── test_helpers.py        # Common test utilities
+└── docs/                      # Documentation
+    ├── version_comparison.md  # Protocol version differences
+    ├── user_guide.md          # How to use the validator
+    └── legacy_tests.md        # Documentation for legacy scripts
 ```
 
-### 5. Test Case Organization
+## Test Case Organization
+1. **Protocol Negotiation**
+   - Version negotiation
+   - Capabilities exchange
+   - Proper error handling for incompatible versions
 
-Each test module should include:
-1. Core functionality tests (required for all versions)
-2. Version-specific tests (tagged with appropriate markers)
-3. Transport-specific tests (tagged with transport compatibility)
+2. **Tools**
+   - Tool listing
+   - Tool calling with parameters
+   - Error handling for invalid tool calls
 
-### 6. Documentation
+3. **Resources**
+   - Resource creation and management
+   - Resource lifecycle
+   - Error handling for invalid resource operations
 
-#### 6.1 README Updates
-- Installation instructions
-- Basic usage examples
-- Common configuration scenarios
-- Troubleshooting guide
+4. **Prompts**
+   - Basic prompt handling
+   - Streaming responses
+   - Context handling
+   - Error cases
 
-#### 6.2 Protocol Version Guide
-- Differences between protocol versions
-- Version-specific features and testing requirements
-- Migration guide for server implementations
+5. **Utilities**
+   - Batch request handling
+   - Error codes and messages
+   - Transport-specific behaviors
 
-#### 6.3 Transport-Specific Documentation
-- HTTP server testing guide
-- STDIO server testing guide
-- Docker container testing guide
+## Documentation Updates
+- Detailed comparison of protocol versions
+- Test case documentation for each feature category
+- Setup and usage guidelines
+- Docker environment setup
+- Legacy test scripts documentation
 
-### 7. Success Metrics
+## Success Metrics
+- All tests pass against reference implementations
+- >90% test coverage for protocol features
+- Clear reporting output for failed tests
 
-1. All tests pass against reference implementations
-2. Test coverage > 90% for core protocol features
-3. Successful comparison between protocol versions
-4. Clear, comprehensive reporting output
-5. Ease of use for both basic and advanced scenarios
+## Timeline
+- Phase 1: 1 week (COMPLETED)
+- Phase 2: 2 weeks (COMPLETED)
+- Phase 3: 1 week (COMPLETED)
+- Phase 4: Ongoing
 
-## Implementation Timeline
-
-1. Phase 1: Refactor Core Architecture (Week 1-2) - IN PROGRESS
-2. Phase 2: Test Suite Organization (Week 3)
-3. Phase 3: CLI and Usability Improvements (Week 4)
-4. Phase 4: Docker Integration and Final Testing (Week 5)
-
-## Deliverables
-
-1. Unified MCP validator framework
-2. Comprehensive test suite
-3. Protocol version comparison tool
-4. Enhanced documentation
-5. Docker integration utilities
-
-## Progress Update (Current Date)
+## Progress
 
 ### Completed
-- ✅ Defined the unified architecture and project structure
-- ✅ Created the transport layer with abstract interface
-- ✅ Implemented HTTP, STDIO, and Docker transport clients
-- ✅ Verified transport implementations with test script
+
+- Core architecture refactoring to support multiple transport protocols
+- Pytest-based test structure with shared helper classes
+- Transport layer implementation (HTTP, STDIO, Docker)
+- Protocol versioning support with test skip logic
+- Create test modules:
+  - test_tools.py
+  - test_protocol_negotiation.py
+  - test_resources.py
+  - test_prompts.py
+  - test_utilities.py
+- Test skip logic for incompatible protocol versions and transport types
+- Added pytest markers for protocol versions and transport types to test modules
+- Repository organization:
+  - Moved legacy test scripts to legacy/ directory
+  - Created reports/ directory for test reports
+  - Updated compare_protocol_versions.py to use new test framework
+  - Added comprehensive README
 
 ### In Progress
-- Protocol version adapters
-- Refactoring test base classes
 
-### Next Steps
-1. Create the protocol version adapters to handle different MCP protocol versions
-2. Refactor the test base classes to use our new transport layer
-3. Create a configuration system for handling test options consistently
-4. Begin reorganizing tests into the new modular structure 
+- Documentation updates:
+  - Protocol version comparison documentation
+  - Transport type compatibility guide
+
+### Future Enhancements
+
+- Expanded test coverage for edge cases
+- Visualization of test results
+- Support for additional transport protocols
+- Test suite for custom tool implementation
+- Performance testing module 
