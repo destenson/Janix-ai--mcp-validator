@@ -12,7 +12,7 @@ import os.path
 
 # Get the path to the root directory
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SERVER_PATH = os.path.join(ROOT_DIR, "minimal_mcp_stdio_server", "minimal_mcp_stdio_server.py")
+SERVER_PATH = os.path.join(ROOT_DIR, "minimal_mcp_server", "minimal_mcp_server.py")
 VALIDATOR_PATH = os.path.join(ROOT_DIR, "run_validator.py")
 
 def run_test(test_spec, protocol_version="2024-11-05", report_name=None):

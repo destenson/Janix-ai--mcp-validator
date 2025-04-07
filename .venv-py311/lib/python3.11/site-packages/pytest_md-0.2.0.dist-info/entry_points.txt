@@ -1,0 +1,3 @@
+[pytest11]
+md = pytest_md.plugin
+

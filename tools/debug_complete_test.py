@@ -14,7 +14,7 @@ import os.path
 
 # Get the path to the root directory
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SERVER_PATH = os.path.join(ROOT_DIR, "minimal_mcp_stdio_server", "minimal_mcp_stdio_server.py")
+SERVER_PATH = os.path.join(ROOT_DIR, "minimal_mcp_server", "minimal_mcp_server.py")
 
 def send_request(server_process, request, description=None):
     """Send a JSON-RPC request to the server and get the response."""

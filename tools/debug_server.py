@@ -12,7 +12,7 @@ import os.path
 
 # Get the path to the root directory
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SERVER_PATH = os.path.join(ROOT_DIR, "minimal_mcp_stdio_server", "minimal_mcp_stdio_server.py")
+SERVER_PATH = os.path.join(ROOT_DIR, "minimal_mcp_server", "minimal_mcp_server.py")
 
 def main():
     print("Starting minimal MCP STDIO server debug session")
