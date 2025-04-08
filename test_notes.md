@@ -66,6 +66,99 @@ Available test modes:
 - `async`: Test asynchronous tool functionality
 - `spec`: Test specification compliance requirements
 
+## Testing Fetch MCP Server
+
+The Fetch MCP server provides web content fetching capabilities for LLMs. It can be installed using different methods, and each method requires a different testing approach.
+
+### Installation Methods
+
+1. **Using `uv` (recommended)**:
+   ```bash
+   # Install uv if not already installed
+   # Run the Fetch server with uvx
+   uvx mcp-server-fetch
+   ```
+
+2. **Using `pip`**:
+   ```bash
+   # Install the package
+   pip install mcp-server-fetch
+   
+   # Run the server
+   python -m mcp_server_fetch
+   ```
+
+3. **Local source installation**:
+   ```bash
+   # Navigate to the source directory
+   cd /path/to/servers/src/fetch
+   
+   # Install dependencies and run
+   pip install -e .
+   python -m mcp_server_fetch
+   ```
+
+4. **Docker**:
+   ```bash
+   # Run via Docker
+   docker run -i --rm mcp/fetch
+   ```
+
+### Testing Fetch Server with MCP Protocol Validator
+
+The fetch server can be tested with the MCP Protocol Validator using any of the installation methods:
+
+```bash
+# Testing with uvx installation
+python -m mcp_testing.scripts.compliance_report --server-command "uvx mcp-server-fetch" --protocol-version 2024-11-05
+
+# Testing with pip installation
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+
+# Testing with local source
+python -m mcp_testing.scripts.compliance_report --server-command "cd /Users/scott/AI/MCP/servers/src/fetch && python -m mcp_server_fetch" --protocol-version 2024-11-05
+
+# Testing with Docker
+python -m mcp_testing.scripts.compliance_report --server-command "docker run -i --rm mcp/fetch" --protocol-version 2024-11-05
+```
+
+### Troubleshooting
+
+When testing the Fetch server, you might encounter a "Failed to start transport" error. This could be due to:
+
+1. **Dependencies not installed**: Make sure all dependencies are installed correctly.
+   ```bash
+   cd /Users/scott/AI/MCP/servers/src/fetch
+   pip install -e .
+   ```
+
+2. **Module Not Found**: The command might need to include the proper Python path.
+   ```bash
+   # Try with PYTHONPATH
+   PYTHONPATH=/Users/scott/AI/MCP/servers/src/fetch python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+   ```
+
+3. **Interactive Mode**: The fetch server might need to be run with the `-i` flag:
+   ```bash
+   python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch -i" --protocol-version 2024-11-05
+   ```
+
+4. **Running Single Script**: Try running the server with a direct path to the script:
+   ```bash
+   python -m mcp_testing.scripts.compliance_report --server-command "python /Users/scott/AI/MCP/servers/src/fetch/src/mcp_server_fetch/__main__.py" --protocol-version 2024-11-05
+   ```
+
+### Server Configuration Details
+
+The Fetch server has the following configuration in the testing framework:
+
+- **Package**: `mcp-server-fetch`
+- **Required Tools**: `fetch`
+- **Recommended Protocol**: 2024-11-05
+- **Skipped Tests**: `test_shutdown`, `test_exit_after_shutdown`, `test_initialization_order`
+
+The fetch server provides a single tool to fetch content from web URLs and convert them to a format suitable for consumption by an LLM.
+
 ## Testing Minimal MCP Server (STDIO)
 
 The repository includes a reference implementation of an MCP server that uses STDIO for transport.

@@ -144,7 +144,7 @@ class VerboseTestRunner:
         
         return result
         
-    async def run_tests(self, tests, protocol, server_command, env_vars):
+    async def run_tests(self, tests, protocol, server_command, env_vars, timeout=None):
         """Run a list of test cases with detailed progress reporting."""
         test_results = []
         total_tests = len(tests)
@@ -180,7 +180,8 @@ class VerboseTestRunner:
             "total": total_tests,
             "passed": passed,
             "failed": failed,
-            "skipped": skipped
+            "skipped": skipped,
+            "timeouts": 0 if timeout is None else 1
         }
 
 async def main():
@@ -199,18 +200,24 @@ async def main():
     parser.add_argument("--report-prefix", default="cr", help="Prefix for report filenames (default: 'cr')")
     parser.add_argument("--json", action="store_true", help="Generate a JSON report")
     
-    # Testing options
+    # Debug and control options
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
-    parser.add_argument("--skip-async", action="store_true", help="Skip async tool tests (for 2025-03-26)")
-    parser.add_argument("--skip-shutdown", action="store_true", help="Skip shutdown method (some servers may not implement this)")
-    parser.add_argument("--required-tools", help="Comma-separated list of tools that must be available")
+    parser.add_argument("--skip-async", action="store_true", help="Skip async tests")
+    parser.add_argument("--skip-shutdown", action="store_true", help="Skip shutdown/exit tests")
+    parser.add_argument("--required-tools", help="Comma-separated list of tools that should be required")
     parser.add_argument("--skip-tests", help="Comma-separated list of test names to skip")
-    parser.add_argument("--dynamic-only", action="store_true", help="Only run dynamic tests that adapt to the server's capabilities")
+    parser.add_argument("--dynamic-only", action="store_true", help="Only run dynamic tools tests")
     parser.add_argument("--test-mode", choices=["all", "core", "tools", "async", "spec"], default="all", 
-                        help="Testing mode: 'all' runs all tests, 'core' runs only initialization tests, 'tools' runs core and tools tests, 'async' runs async tests, 'spec' runs specification coverage tests")
-    parser.add_argument("--spec-coverage-only", action="store_true", help="Only run specification coverage tests")
-    parser.add_argument("--auto-detect", action="store_true", help="Auto-detect server settings based on server command")
-    parser.add_argument("--verbose", action="store_true", help="Show detailed progress information")
+                      help="Test mode: all, core, tools, async, or spec")
+    parser.add_argument("--spec-coverage-only", action="store_true", 
+                      help="Only run tests for spec coverage")
+    parser.add_argument("--auto-detect", action="store_true", 
+                      help="Auto-detect server type and apply appropriate configuration")
+    parser.add_argument("--test-timeout", type=int, default=30,
+                      help="Timeout in seconds for individual tests")
+    parser.add_argument("--tools-timeout", type=int, default=30,
+                      help="Timeout in seconds for tools tests (which often take more time)")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
     
     args = parser.parse_args()
     
@@ -337,15 +344,66 @@ async def main():
     # Run the tests
     start_time = time.time()
     
+    # Set timeouts based on arguments
+    test_timeout = args.test_timeout
+    tools_timeout = args.tools_timeout
+    
     if args.verbose or True:  # Always use verbose logging
         # Use our custom verbose test runner
         runner = VerboseTestRunner(debug=args.debug)
-        results = await runner.run_tests(tests, args.protocol_version, full_server_command, env_vars)
+        
+        # Group tests by type and run with appropriate timeouts
+        tool_tests = [(func, name) for func, name in tests if name.startswith("test_tool_") or name.startswith("test_tools_")]
+        non_tool_tests = [(func, name) for func, name in tests if not (name.startswith("test_tool_") or name.startswith("test_tools_"))]
+        
+        # Run non-tool tests first with standard timeout
+        if non_tool_tests:
+            log_with_timestamp(f"Running {len(non_tool_tests)} non-tool tests with {test_timeout}s timeout")
+            non_tool_results = await runner.run_tests(
+                non_tool_tests, 
+                args.protocol_version, 
+                full_server_command, 
+                env_vars,
+                timeout=test_timeout
+            )
+        else:
+            non_tool_results = {"results": [], "total": 0, "passed": 0, "failed": 0, "skipped": 0}
+        
+        # Run tool tests with extended timeout
+        if tool_tests:
+            log_with_timestamp(f"Running {len(tool_tests)} tool tests with {tools_timeout}s timeout")
+            tool_results = await runner.run_tests(
+                tool_tests, 
+                args.protocol_version, 
+                full_server_command, 
+                env_vars,
+                timeout=tools_timeout
+            )
+        else:
+            tool_results = {"results": [], "total": 0, "passed": 0, "failed": 0, "skipped": 0}
+        
+        # Combine results
+        results = {
+            "results": non_tool_results["results"] + tool_results["results"],
+            "total": non_tool_results["total"] + tool_results["total"],
+            "passed": non_tool_results["passed"] + tool_results["passed"],
+            "failed": non_tool_results["failed"] + tool_results["failed"],
+            "skipped": non_tool_results["skipped"] + tool_results["skipped"],
+            "timeouts": non_tool_results.get("timeouts", 0) + tool_results.get("timeouts", 0)
+        }
     else:
         # Use the standard test runner
         from mcp_testing.utils.runner import MCPTestRunner
         runner = MCPTestRunner(debug=args.debug)
-        results = await run_tests(tests, args.protocol_version, "stdio", full_server_command, env_vars)
+        results = await run_tests(
+            tests, 
+            args.protocol_version, 
+            "stdio", 
+            full_server_command, 
+            env_vars,
+            debug=args.debug,
+            timeout=tools_timeout  # Use the longer timeout for all tests in non-verbose mode
+        )
     
     # Calculate summary information - Ensure results is a dictionary with the right fields
     if isinstance(results, dict) and 'total' in results:

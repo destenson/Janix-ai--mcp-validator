@@ -102,6 +102,43 @@ python -m mcp_testing.scripts.http_test --server-url http://localhost:8000 --pro
 
 See the [HTTP Server README](minimal_http_server/README.md) for more details.
 
+## Testing Pip-Installed MCP Servers
+
+The testing framework supports testing MCP servers that are installed via pip (like `mcp-server-fetch`). To successfully test such servers:
+
+1. **Install the server in the same environment as the testing framework:**
+
+```bash
+# Ensure you're in the correct virtual environment where the testing framework is installed
+source .venv/bin/activate  # Or activate your virtual environment
+
+# Install the server package and its dependencies
+pip install mcp-server-fetch sseclient-py==1.7.2  # For the fetch server example
+```
+
+2. **Run the tests specifying the module-style command:**
+
+```bash
+# Run basic interaction test (simplest test)
+python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+
+# Run compliance tests with tools-only mode
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-mode tools
+
+# Run complete compliance tests
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+```
+
+### Troubleshooting Pip-Installed Servers
+
+If you encounter issues when testing pip-installed servers:
+
+- **"Failed to start transport" error**: Ensure the server is installed in the same environment as the testing framework
+- **Module not found errors**: Verify the module is installed with `python -c "import module_name"`
+- **Dependency issues**: Make sure all required dependencies are installed
+
+For more details, see the [Pip-Installed Servers Plan](plan_pip.md).
+
 ## MCP Testing Framework
 
 A flexible testing framework for verifying MCP server compliance with protocol specifications.
