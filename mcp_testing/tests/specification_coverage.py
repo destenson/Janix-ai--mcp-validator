@@ -321,19 +321,41 @@ async def test_jsonrpc_batch_support(protocol: MCPProtocolAdapter) -> Tuple[bool
         # Some transports might not support direct batch sending
         # so we'll catch exceptions and report accordingly
         try:
-            responses = protocol.transport.send_batch(batch)
-            
-            # Verify we got the correct number of responses
-            if len(responses) != batch_size:
-                return False, f"Expected {batch_size} responses, got {len(responses)}"
-            
-            # Verify each response has a valid result
-            for i, response in enumerate(responses):
-                if "result" not in response:
-                    error_msg = response.get("error", {}).get("message", "Unknown error")
-                    return False, f"Batch request {i} failed: {error_msg}"
-            
-            return True, "Server correctly processes JSON-RPC batch requests"
+            # Add a timeout to prevent hanging on this test
+            import asyncio
+            from concurrent.futures import TimeoutError
+
+            # Create a future to wrap the batch send operation
+            async def send_batch_with_timeout():
+                try:
+                    return protocol.transport.send_batch(batch)
+                except Exception as e:
+                    return {"error": str(e)}
+
+            # Execute with a timeout
+            try:
+                responses = await asyncio.wait_for(send_batch_with_timeout(), timeout=5.0)
+                
+                # Check if we got an error response
+                if isinstance(responses, dict) and "error" in responses:
+                    return False, f"Batch request failed: {responses['error']}"
+                
+                # Verify we got the correct number of responses
+                if len(responses) != batch_size:
+                    return False, f"Expected {batch_size} responses, got {len(responses)}"
+                
+                # Verify each response has a valid result
+                for i, response in enumerate(responses):
+                    if "result" not in response:
+                        error_msg = response.get("error", {}).get("message", "Unknown error")
+                        return False, f"Batch request {i} failed: {error_msg}"
+                
+                return True, "Server correctly processes JSON-RPC batch requests"
+            except TimeoutError:
+                return False, "Batch request timed out after 5 seconds - server may not support batch requests correctly"
+            except Exception as e:
+                return False, f"Error during batch request: {str(e)}"
+                
         except AttributeError:
             # If the transport doesn't have a send_batch method, try an alternative approach
             # This is a workaround for transports that don't directly support batching
