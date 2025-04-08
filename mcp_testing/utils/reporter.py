@@ -52,21 +52,57 @@ def generate_markdown_report(results: Dict[str, Any], server_command: str, proto
     # Extract server command details - use the base filename if it's a path
     server_name = server_command.split("/")[-1] if "/" in server_command else server_command
     
+    # Extract server name more cleanly from the command
+    if "npx" in server_name and "@" in server_name:
+        # For npm packages like 'npx -y @modelcontextprotocol/server-brave-search'
+        parts = server_name.split("@")
+        if len(parts) > 1:
+            # Extract the package name after the @ symbol
+            package_parts = parts[1].split("/")
+            if len(package_parts) > 1:
+                server_name = package_parts[1]  # Get the part after the slash
+    else:
+        # For other commands, just use the last part of the path
+        server_name = server_name.split(" ")[0]  # Get the first part before any arguments
+    
+    # Format the server name for display
+    display_name = server_name.replace("-", " ").replace("server ", "").title()
+    
     # Get current date and time
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d %H:%M:%S")
     
-    # Start building the report
+    # Start building the report with server name at the top
     report = [
-        f"# MCP Compliance Report",
+        f"# {display_name} MCP Compliance Report",
         f"",
+    ]
+    
+    # Add server metadata
+    metadata = {"Server": display_name, "Version": protocol_version, "Date": date_str}
+    
+    # Extract additional metadata from server config
+    if server_config and isinstance(server_config, dict):
+        if "required_tools" in server_config:
+            tools = ", ".join(server_config["required_tools"])
+            metadata["Tools"] = tools
+    
+    # Add metadata table
+    report.append("| Metadata | Value |")
+    report.append("|----------|-------|")
+    for key, value in metadata.items():
+        report.append(f"| **{key}** | {value} |")
+    report.append("")
+    
+    # Continue with standard report sections
+    report.extend([
         f"## Server Information",
         f"",
         f"- **Server Command**: `{server_command}`",
         f"- **Protocol Version**: {protocol_version}",
         f"- **Test Date**: {date_str}",
         f"",
-    ]
+    ])
     
     # Add server config info if provided
     if server_config:

@@ -6,6 +6,27 @@ Generate a compliance report for an MCP server.
 
 This script runs tests against any MCP server and generates a detailed compliance report.
 It adapts to the server's capabilities rather than having fixed expectations.
+
+Environment Variables:
+    MCP_SKIP_SHUTDOWN:     Set to 'true' to skip calling the shutdown method
+    MCP_PROTOCOL_VERSION:  Set the protocol version to test against
+    MCP_REQUIRED_TOOLS:    Comma-separated list of required tools
+    
+    Server-specific environment variables can be set in two ways:
+    1. Set the variable directly, e.g., BRAVE_API_KEY=your_key
+    2. Use MCP_DEFAULT_* prefix for default values, e.g., MCP_DEFAULT_BRAVE_API_KEY=default_key
+    
+    The script will warn about missing required environment variables for specific servers.
+
+Server Configurations:
+    The system uses configuration files in the 'server_configs' directory to determine:
+    - Required environment variables for each server
+    - Tests that should be skipped
+    - Required tools for the server
+    - Recommended protocol version
+    
+    To support a new server, add a JSON configuration file to the 'server_configs' directory.
+    See the README.md file in that directory for details on the configuration format.
 """
 
 import argparse
