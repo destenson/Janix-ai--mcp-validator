@@ -1,245 +1,427 @@
-# MCP Server Testing Suite Plan
+# Plan for MCP Protocol Validator GitHub Action
 
 ## Overview
-This document outlines a comprehensive testing approach for both stdio and HTTP MCP servers. The goal is to create a reusable testing framework that allows testing any MCP server implementation against either the 2024-11-05 or 2025-03-26 protocol specifications.
 
-## Implementation Status
+We'll create a GitHub Action that can be incorporated into any server repository implementing the MCP protocol. This will enable automatic validation against protocol specifications on Pull Requests.
 
-### ✅ Completed
-- Full implementation of minimal_mcp_server with stdio transport
-- Support for both 2024-11-05 and 2025-03-26 protocol versions
-- Async tool functionality for the 2025-03-26 protocol
-- Comprehensive test suite implementation
-- All tests now passing for both protocol versions
+## Implementation Steps
 
-### 🔄 In Progress
-- HTTP transport implementation
-- Performance optimization
-- Documentation updates
+1. **Create GitHub Action Definition**
+   - Develop a reusable GitHub Action workflow file in `.github/workflows/`
+   - Package the validator as a GitHub Action that can be imported in other repositories
 
-## Test Suite Structure
+2. **Develop Action Script**
+   - Create a flexible setup script that can adapt to different server implementations
+   - Add support for both HTTP and STDIO server testing
+   - Include configurable parameters for protocol versions and testing modes
 
-### 1. Core Components
+3. **Compliance Report Generation**
+   - Generate detailed Markdown reports for PR comments
+   - Create status badges for README display
+   - Store test results as GitHub Action artifacts
 
-#### 1.1 Transport Adapters
-- **StdioTransportAdapter**: For testing servers via stdin/stdout ✅
-- **HttpTransportAdapter**: For testing servers via HTTP/SSE 🔄
+4. **Server-Specific Configuration**
+   - Support a configuration file for server-specific settings
+   - Allow customization of server startup commands and arguments
+   - Include options for required tools and test exclusions
 
-Each adapter will implement a common interface that provides methods to:
-- Start/stop the server process
-- Send requests/notifications
-- Receive responses/notifications
-- Handle initialization/shutdown sequences
+5. **Integration Documentation**
+   - Create comprehensive documentation for integration steps
+   - Include example configurations for common server types
+   - Provide troubleshooting guide
 
-#### 1.2 Protocol Adapters
-- **MCP2024_11_05ProtocolAdapter**: For testing 2024-11-05 protocol compliance ✅
-- **MCP2025_03_26ProtocolAdapter**: For testing 2025-03-26 protocol compliance ✅
+## Detailed Implementation Plan
 
-These adapters will handle protocol-specific details while using the transport adapters for communication.
+### 1. GitHub Action Definition
 
-#### 1.3 Test Runner
-A utility to execute test cases with specific protocol/transport combinations and collect results. ✅
+Create a GitHub Action definition in `action.yml`:
 
-### 2. Test Categories
-
-#### 2.1 Base Protocol Tests ✅
-- **Initialization**: Test server initialization and version negotiation
-- **Message Formatting**: Test JSON-RPC request/response formatting
-- **Error Handling**: Test proper error responses
-- **Batch Processing**: Test batch request handling
-- **Lifecycle Management**: Test shutdown/exit behavior
-
-#### 2.2 Core Feature Tests ✅
-- **Tools**: Test tools/list and tools/call
-  - Test built-in tools
-  - Test tool error conditions
-  - Test async tool calls (for 2025-03-26)
-- **Resources**: Test resources/list, resources/get, resources/create
-- **Prompt**: Test prompt/completion and prompt/models
-
-#### 2.3 Transport-Specific Tests
-- **STDIO-specific**: Newline handling, process management ✅
-- **HTTP-specific**: SSE streaming, session management, HTTP status codes 🔄
-
-#### 2.4 Protocol-Specific Tests ✅
-- **2024-11-05 specific features**
-- **2025-03-26 specific features** (async tool execution)
-
-### 3. Implementation Progress
-
-#### 3.1 Phase 1: Setup Testing Framework ✅
-1. Create base interfaces for transport and protocol adapters
-2. Implement stdio transport adapter
-3. Create basic test runner
-4. Implement 2024-11-05 protocol adapter
-5. Create initial base protocol tests
-
-#### 3.2 Phase 2: Expand Test Coverage ✅
-1. Add tools/resources/prompt tests
-2. Implement 2025-03-26 protocol adapter with async tool support
-3. Add protocol-specific tests
-4. Add transport-specific tests (STDIO)
-
-#### 3.3 Phase 3: Reporting and Integration ✅
-1. Implement test result collection and reporting
-2. Create utility scripts for running test suites
-3. Add documentation for adding new test cases
-
-#### 3.4 Phase 4: Additional Transport Support 🔄
-1. Implement HTTP transport adapter
-2. Add HTTP-specific tests
-3. Create visualizations for test coverage
-
-## 4. Test Implementations
-
-### 4.1 Base Protocol Test Cases ✅
-
-#### Initialize Tests
-- Test proper initialization with supported protocol version
-- Test initialization with unsupported protocol version
-- Test initialization without required parameters
-
-#### JSON-RPC Message Tests
-- Test proper request handling
-- Test malformed request handling
-- Test notification handling
-- Test batch request handling
-- Test error response formatting
-
-#### Lifecycle Tests
-- Test shutdown/exit sequence
-- Test behavior after shutdown
-
-### 4.2 Feature Test Cases ✅
-
-#### Tools Tests
-- Test tools/list returns correct tools
-- Test tools/call with valid parameters
-- Test tools/call with invalid parameters
-- Test async tool calls (2025-03-26)
-  - Test tools/call-async
-  - Test tools/result for monitoring async operations
-  - Test tools/cancel for canceling async operations
-  - Test proper status reporting (running, completed, cancelled)
-
-#### Resources Tests
-- Test resources/list returns correct resources
-- Test resources/get with valid ID
-- Test resources/get with invalid ID
-- Test resources/create with valid data
-- Test resources/create with invalid data
-
-#### Prompt Tests
-- Test prompt/completion with valid input
-- Test prompt/completion with invalid input
-- Test prompt/models returns correct models
-
-### 4.3 Transport-Specific Test Cases
-
-#### STDIO Tests ✅
-- Test newline handling
-- Test process termination behavior
-- Test stderr output
-
-#### HTTP Tests 🔄
-- Test SSE streaming
-- Test session management
-- Test HTTP status codes
-- Test HTTP headers
-
-## 5. Development Approach
-
-### 5.1 Directory Structure ✅
-```
-mcp-testing/
-├── transports/     # Transport adapters
-│   ├── base.py     # Base transport adapter
-│   ├── stdio.py    # STDIO transport adapter
-│   └── http.py     # HTTP transport adapter (pending)
-├── protocols/      # Protocol adapters
-│   ├── base.py     # Base protocol adapter
-│   ├── v2024_11_05.py  # 2024-11-05 protocol adapter
-│   └── v2025_03_26.py  # 2025-03-26 protocol adapter
-├── tests/          # Test cases
-│   ├── base_protocol/  # Base protocol tests
-│   ├── features/   # Feature tests
-│   ├── transport_stdio/  # STDIO transport tests
-│   └── transport_http/   # HTTP transport tests (pending)
-├── utils/          # Utilities
-│   └── runner.py   # Test runner
-├── scripts/        # Scripts
-│   ├── run_stdio_tests.py  # Run tests against STDIO server
-│   └── run_http_tests.py   # Run tests against HTTP server (pending)
-└── README.md       # Documentation
+```yaml
+name: 'MCP Protocol Compliance Validator'
+description: 'Validate an MCP server implementation against protocol specifications'
+author: 'Scott Wilcox'
+inputs:
+  server-type:
+    description: 'Type of MCP server (stdio or http)'
+    required: true
+    default: 'http'
+  server-command:
+    description: 'Command to start the server (for stdio servers)'
+    required: false
+  server-url:
+    description: 'URL of the HTTP server (for http servers)'
+    required: false
+    default: 'http://localhost:8000/mcp'
+  protocol-version:
+    description: 'Protocol version to test against'
+    required: false
+    default: '2025-03-26'
+  test-mode:
+    description: 'Testing mode: all, core, tools, async, spec'
+    required: false
+    default: 'all'
+  server-config:
+    description: 'Path to server configuration JSON file'
+    required: false
+  dynamic-only:
+    description: 'Only run dynamic tests that adapt to server capabilities'
+    required: false
+    default: 'true'
+  skip-shutdown:
+    description: 'Skip shutdown method for servers that do not implement it'
+    required: false
+    default: 'false'
+  output-dir:
+    description: 'Directory to store report files'
+    required: false
+    default: 'reports'
+outputs:
+  compliance-score:
+    description: 'Compliance score percentage'
+  report-path:
+    description: 'Path to the generated compliance report'
+  status:
+    description: 'Test status (success/failure)'
+runs:
+  using: 'composite'
+  steps:
+    # Implementation steps will go here
 ```
 
-### 5.2 Implementation Strategy ✅
-1. Started with a minimal implementation focusing on stdio transport
-2. Used TDD (Test-Driven Development) approach
-3. Used the minimal_mcp_server as a reference implementation for validation
-4. Successfully implemented and tested async tool functionality for 2025-03-26
+### 2. Create Workflow Scripts
 
-### 5.3 Dependencies
-- pytest for test execution
-- requests for HTTP communication
-- sseclient-py for SSE handling
-- rich for console output formatting
-- click for CLI interface
+Develop a wrapper script that handles both STDIO and HTTP server types:
 
-## 6. Integration with minimal_mcp_server ✅
+```python
+#!/usr/bin/env python3
+# validate_mcp_server.py
 
-The minimal_mcp_server has been successfully implemented and tested to:
-1. Pass all validation tests for both 2024-11-05 and 2025-03-26 protocol versions
-2. Demonstrate correct implementation of async tool functionality
-3. Serve as a reference implementation for other servers
+import os
+import sys
+import subprocess
+import json
+import time
 
-### Key Features Implemented in minimal_mcp_server:
-- Full protocol compliance for both versions
-- Proper async tool support with the 2025-03-26 protocol
-- Robust error handling
-- Complete implementation of all required methods
-- Support for long-running operations and cancellation
+# Server type and parameters
+server_type = os.environ.get('INPUT_SERVER-TYPE', 'http')
+protocol_version = os.environ.get('INPUT_PROTOCOL-VERSION', '2025-03-26')
+output_dir = os.environ.get('INPUT_OUTPUT-DIR', 'reports')
+test_mode = os.environ.get('INPUT_TEST-MODE', 'all')
+dynamic_only = os.environ.get('INPUT_DYNAMIC-ONLY', 'true') == 'true'
+skip_shutdown = os.environ.get('INPUT_SKIP-SHUTDOWN', 'false') == 'true'
+server_config = os.environ.get('INPUT_SERVER-CONFIG', '')
 
-## 7. Conclusion
+# Create output directory
+os.makedirs(output_dir, exist_ok=True)
 
-The testing suite has provided a comprehensive framework for testing MCP server implementations against both protocol specifications using the STDIO transport mechanism. The implementation of minimal_mcp_server serves as a complete reference implementation that correctly implements all aspects of the protocol, including the async tools functionality in the 2025-03-26 version. Future work will focus on extending support to HTTP transport and creating more advanced visualization tools for test results. 
+# Determine which test script to run based on server type
+if server_type.lower() == 'stdio':
+    server_command = os.environ.get('INPUT_SERVER-COMMAND', '')
+    if not server_command:
+        print("Error: Server command must be provided for STDIO servers")
+        sys.exit(1)
+    
+    cmd = [
+        'python', '-m', 'mcp_testing.scripts.compliance_report',
+        '--server-command', server_command,
+        '--protocol-version', protocol_version,
+        '--output-dir', output_dir,
+        '--test-mode', test_mode
+    ]
+    
+    if dynamic_only:
+        cmd.append('--dynamic-only')
+    
+    if skip_shutdown:
+        cmd.append('--skip-shutdown')
+    
+    if server_config:
+        cmd.extend(['--server-config', server_config])
+    
+elif server_type.lower() == 'http':
+    server_url = os.environ.get('INPUT_SERVER-URL', 'http://localhost:8000/mcp')
+    
+    # Wait for server to be ready
+    max_retries = 10
+    retry_interval = 3
+    for i in range(max_retries):
+        try:
+            import urllib.request
+            urllib.request.urlopen(server_url, timeout=5)
+            print(f"Server is ready at {server_url}")
+            break
+        except Exception as e:
+            print(f"Waiting for server to be ready... ({i+1}/{max_retries})")
+            if i == max_retries - 1:
+                print(f"Error: Could not connect to server at {server_url}")
+                sys.exit(1)
+            time.sleep(retry_interval)
+    
+    cmd = [
+        'python', '-m', 'mcp_testing.scripts.http_test',
+        '--server-url', server_url,
+        '--protocol-version', protocol_version,
+        '--output-dir', output_dir,
+        '--max-retries', '5',
+        '--retry-interval', '3'
+    ]
+    
+else:
+    print(f"Error: Unknown server type: {server_type}")
+    sys.exit(1)
 
-## 8. Implementation Challenges
+# Run the tests
+print(f"Running MCP compliance tests with command: {' '.join(cmd)}")
+result = subprocess.run(cmd, capture_output=True, text=True)
 
-During the development of the testing framework, we've encountered a few challenges that required temporary workarounds:
+# Output the results
+print(result.stdout)
+if result.stderr:
+    print(f"Errors:\n{result.stderr}")
 
-### 8.1 Temporarily Disabled Tests
+# Parse the compliance score from the output
+compliance_score = 0
+for line in result.stdout.splitlines():
+    if "Compliance Status:" in line and "%" in line:
+        try:
+            compliance_score = line.split("(")[1].split("%")[0]
+            break
+        except IndexError:
+            pass
 
-#### 8.1.1 Parallel Requests Test
-The `test_parallel_requests` test is currently disabled in the test suite due to implementation challenges with the asynchronous execution model:
+# Set the action outputs
+with open(os.environ.get('GITHUB_OUTPUT', ''), 'a') as f:
+    f.write(f"compliance-score={compliance_score}\n")
+    f.write(f"report-path={output_dir}\n")
+    f.write(f"status={'success' if result.returncode == 0 else 'failure'}\n")
 
-- **Goal**: Verify that servers can handle multiple concurrent requests correctly and maintain request/response correspondence.
-- **Challenge**: The current transport adapter implementation's `send_request` method is synchronous, which doesn't integrate well with Python's async/await model when trying to simulate concurrent requests.
-- **Current Status**: The test is commented out in the `TEST_CASES` list in `specification_coverage.py`.
-- **Future Solution**: Refactoring the transport layer to better support true concurrent operations, potentially by implementing a fully non-blocking I/O approach or moving the transport handling to a separate thread/process.
+sys.exit(result.returncode)
+```
 
-#### 8.1.2 Shutdown Sequence Test
-The `test_shutdown_sequence` test is temporarily disabled due to its impact on the test runner:
+### 3. Create Example Workflow File
 
-- **Goal**: Verify that servers properly handle the shutdown sequence and terminate cleanly.
-- **Challenge**: When the server shuts down in response to the shutdown method, it terminates the connection, which disrupts the test runner's ability to continue communication or verify results.
-- **Current Status**: The test is commented out in the `TEST_CASES` list in `specification_coverage.py`.
-- **Workaround**: The `--skip-shutdown` flag can be used when running compliance tests against servers.
-- **Future Solution**: Modify the test runner to handle disconnections more gracefully, or implement a more sophisticated approach that can verify server behavior after shutdown without requiring continued communication.
+Provide a template `.github/workflows/mcp-compliance.yml` that users can add to their repositories:
 
-### 8.2 Implications for Server Implementations
+```yaml
+name: MCP Protocol Compliance
 
-Despite these tests being disabled in the automated test suite, server implementations should still:
+on:
+  pull_request:
+    branches: [ main, master ]
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
 
-1. **Handle Concurrent Requests**: Servers should be designed to handle multiple concurrent requests, properly maintaining the correspondence between requests and responses.
-2. **Implement Proper Shutdown**: Servers should correctly implement the shutdown sequence as specified in the protocol, ensuring clean termination and resource cleanup.
+jobs:
+  validate-mcp-server:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    # Example step for starting HTTP server (users would modify this)
+    - name: Start MCP HTTP Server
+      run: |
+        pip install -r requirements.txt
+        # Replace with actual server start command
+        python server.py &
+        sleep 5  # Allow server to start
+      
+    - name: Run MCP Compliance Tests
+      id: compliance
+      uses: mcp/protocol-validator@v1  # Replace with actual action repo
+      with:
+        server-type: 'http'
+        server-url: 'http://localhost:8000/mcp'
+        protocol-version: '2025-03-26'
+        dynamic-only: 'true'
+    
+    - name: Upload Compliance Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: mcp-compliance-report
+        path: ${{ steps.compliance.outputs.report-path }}
+    
+    - name: Comment PR with Compliance Result
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const reportPath = require('path').join(
+            process.env.GITHUB_WORKSPACE,
+            '${{ steps.compliance.outputs.report-path }}',
+            'http_test_report_2025-03-26.md'
+          );
+          
+          let reportContent = '';
+          if (fs.existsSync(reportPath)) {
+            reportContent = fs.readFileSync(reportPath, 'utf8');
+          } else {
+            reportContent = 'Report file not found.';
+          }
+          
+          const complianceScore = '${{ steps.compliance.outputs.compliance-score }}';
+          const status = '${{ steps.compliance.outputs.status }}';
+          
+          const comment = `## MCP Protocol Compliance: ${status === 'success' ? '✅' : '❌'}
+          
+          Compliance Score: ${complianceScore}%
+          
+          <details>
+          <summary>View Full Report</summary>
+          
+          ${reportContent}
+          </details>`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+```
 
-### 8.3 Future Work
+### 4. Configuration File Structure
 
-Addressing these challenges is part of our future roadmap:
+Create a sample configuration file template for server-specific settings:
 
-1. Enhance the transport layer to support true concurrency for parallel request testing
-2. Improve the test runner's handling of disconnections for shutdown sequence testing
-3. Consider implementing more sophisticated monitoring approaches that can verify post-shutdown behavior
+```json
+{
+  "server_name": "My MCP Server",
+  "required_tools": ["echo", "add", "list_directory"],
+  "skip_tests": ["test_async_tools"],
+  "custom_settings": {
+    "timeout": 30,
+    "max_response_time": 5000
+  }
+}
+```
 
-## 9. Conclusion 
+### 5. Integration Documentation
+
+Finally, create a comprehensive README that explains how to use the GitHub Action:
+
+```markdown
+# MCP Protocol Validator GitHub Action
+
+This GitHub Action validates MCP (Model Conversation Protocol) server implementations against the official protocol specifications.
+
+## Usage
+
+Add this GitHub Action to your workflow file:
+
+```yaml
+- name: Run MCP Compliance Tests
+  uses: mcp/protocol-validator@v1
+  with:
+    server-type: 'http'
+    server-url: 'http://localhost:8000/mcp'
+```
+
+## Inputs
+
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| server-type | Type of MCP server (stdio or http) | Yes | http |
+| server-command | Command to start the server (for stdio servers) | For stdio | - |
+| server-url | URL of the HTTP server (for http servers) | For http | http://localhost:8000/mcp |
+| protocol-version | Protocol version to test against | No | 2025-03-26 |
+| test-mode | Testing mode (all, core, tools, async, spec) | No | all |
+| server-config | Path to server configuration JSON file | No | - |
+| dynamic-only | Only run dynamic tests that adapt to server capabilities | No | true |
+| skip-shutdown | Skip shutdown method for servers that don't implement it | No | false |
+| output-dir | Directory to store report files | No | reports |
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| compliance-score | Compliance score percentage |
+| report-path | Path to the generated compliance report |
+| status | Test status (success/failure) |
+
+## Examples
+
+### HTTP Server Example
+
+```yaml
+name: MCP Protocol Compliance
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-mcp-server:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Start MCP HTTP Server
+      run: |
+        npm install
+        npm start &
+        sleep 5  # Allow server to start
+      
+    - name: Run MCP Compliance Tests
+      id: compliance
+      uses: mcp/protocol-validator@v1
+      with:
+        server-type: 'http'
+        server-url: 'http://localhost:8000/mcp'
+        protocol-version: '2025-03-26'
+```
+
+### STDIO Server Example
+
+```yaml
+name: MCP Protocol Compliance
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-mcp-server:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Run MCP Compliance Tests
+      id: compliance
+      uses: mcp/protocol-validator@v1
+      with:
+        server-type: 'stdio'
+        server-command: 'python ./my_mcp_server.py'
+        protocol-version: '2025-03-26'
+        skip-shutdown: 'true'
+```
+```
+
+## Benefits of the GitHub Action Approach
+
+1. **Universal Testing**: Any MCP server implementation can be validated against the protocol specification.
+
+2. **Integration with CI/CD**: Automatically test protocol compliance on every PR or push.
+
+3. **Protocol Version Testing**: Ensure compatibility with specific MCP protocol versions.
+
+4. **Detailed Reporting**: Generate comprehensive reports of test results.
+
+5. **Dynamic Adaptation**: Tests adapt to each server's unique tool capabilities rather than enforcing fixed expectations.
+
+6. **Configurable Testing**: Control which parts of the protocol are tested based on server features.
+
+## Conclusion
+
+This plan outlines a comprehensive approach to creating a GitHub Action for MCP protocol compliance testing. The action will make it simple for any repository implementing an MCP server to validate their implementation against the protocol specifications through automated testing on Pull Requests.
+
+By leveraging the existing dynamic testing capabilities of the MCP Protocol Validator, this GitHub Action will be flexible enough to work with any server implementation, regardless of the specific tools it provides or its unique features. The action will generate detailed compliance reports that highlight any areas where the server doesn't meet the protocol specifications. 
