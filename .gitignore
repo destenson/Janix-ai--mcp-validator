@@ -30,3 +30,4 @@ reports/
 # Jupyter Notebooks checkpoints
 .ipynb_checkpoints/
 .DS_Store
+.venv/
