@@ -102,6 +102,58 @@ python -m mcp_testing.scripts.http_test --server-url http://localhost:8000 --pro
 
 See the [HTTP Server README](minimal_http_server/README.md) for more details.
 
+## Testing Pip-Installed MCP Servers
+
+The testing framework supports testing MCP servers that are installed via pip (like `mcp-server-fetch`). To successfully test such servers:
+
+1. **Install the server in the same environment as the testing framework:**
+
+```bash
+# Ensure you're in the correct virtual environment where the testing framework is installed
+source .venv/bin/activate  # Or activate your virtual environment
+
+# Install the server package and its dependencies
+pip install mcp-server-fetch sseclient-py==1.7.2  # For the fetch server example
+```
+
+2. **Run the tests specifying the module-style command:**
+
+```bash
+# Run basic interaction test (simplest test)
+python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+
+# Run compliance tests with tools-only mode
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-mode tools
+
+# Run complete compliance tests
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+```
+
+3. **Handling servers with timeout issues:**
+
+When working with servers that may hang during certain operations (particularly tools tests), you can use the timeout features:
+
+```bash
+# Set timeouts for tools tests vs. other tests
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-timeout 30 --tools-timeout 15
+
+# For servers with known tool list issues, try the basic interaction script
+python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+```
+
+Tool-related tests that timeout are now treated as non-critical, allowing the testing process to continue and produce reports even when specific methods like `tools/list` hang.
+
+### Troubleshooting Pip-Installed Servers
+
+If you encounter issues when testing pip-installed servers:
+
+- **"Failed to start transport" error**: Ensure the server is installed in the same environment as the testing framework
+- **Module not found errors**: Verify the module is installed with `python -c "import module_name"`
+- **Dependency issues**: Make sure all required dependencies are installed
+- **Hanging/timeout issues**: Use the `--test-timeout` and `--tools-timeout` parameters to set appropriate timeouts
+
+For more details, see the [Pip-Installed Servers Plan](plan_pip.md) and [Test Notes](test_notes.md) documents.
+
 ## MCP Testing Framework
 
 A flexible testing framework for verifying MCP server compliance with protocol specifications.
@@ -186,6 +238,9 @@ python -m mcp_testing.scripts.compliance_report --server-command "/path/to/serve
 
 # Auto-detect server capabilities and protocol version
 python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --auto-detect
+
+# Set timeouts for tests (tools tests often need different timeouts)
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-timeout 30 --tools-timeout 15
 ```
 
 For HTTP testing, additional options include:
@@ -213,6 +268,30 @@ The generated reports include:
 - Specification coverage metrics
 - Server capabilities overview
 - Compliance status and score
+
+### Basic Testing
+
+For servers that may have issues with specific protocol features (like tools functionality), a simplified basic interaction script is available:
+
+```bash
+# Run a basic test that only verifies server initialization and lists tools
+python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+```
+
+This script:
+- Starts the server
+- Sends an initialization request
+- Verifies the response
+- Lists available tools (if the server responds correctly)
+- Terminates gracefully
+
+This is useful for:
+- Initial verification of server functionality
+- Testing servers with known issues in complex compliance tests
+- Quick verification of initialization success
+- Interactive exploration of available tools
+
+The script displays output directly in the terminal, making it easy to see exactly what's happening during the server communication.
 
 ### Running the Test Suite
 

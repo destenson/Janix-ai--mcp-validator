@@ -42,7 +42,7 @@ description: 'Validate an MCP server implementation against protocol specificati
 author: 'Scott Wilcox'
 inputs:
   server-type:
-    description: 'Type of MCP server (stdio or http)'
+    description: 'Type of MCP server (stdio, http, or docker)'
     required: true
     default: 'http'
   server-command:
@@ -75,6 +75,35 @@ inputs:
     description: 'Directory to store report files'
     required: false
     default: 'reports'
+  docker-image:
+    description: 'Docker image name to run (for docker server-type)'
+    required: false
+  docker-port:
+    description: 'Port the server listens on inside the container (for HTTP protocol)'
+    required: false
+    default: '8000'
+  docker-host-port:
+    description: 'Port to map to on the host (for HTTP protocol)'
+    required: false
+    default: '8000'
+  docker-protocol:
+    description: 'Protocol used by the Docker container (http or stdio)'
+    required: false
+    default: 'http'
+  docker-server-command:
+    description: 'Command to run inside container (for STDIO protocol)'
+    required: false
+  docker-working-dir:
+    description: 'Working directory inside container (for STDIO protocol)'
+    required: false
+  docker-env:
+    description: 'Environment variables for the Docker container (JSON format)'
+    required: false
+    default: '{}'
+  server-path:
+    description: 'Path to the MCP endpoint (for HTTP servers)'
+    required: false
+    default: '/mcp'
 outputs:
   compliance-score:
     description: 'Compliance score percentage'
@@ -101,6 +130,7 @@ import sys
 import subprocess
 import json
 import time
+import docker
 
 # Server type and parameters
 server_type = os.environ.get('INPUT_SERVER-TYPE', 'http')
@@ -110,6 +140,15 @@ test_mode = os.environ.get('INPUT_TEST-MODE', 'all')
 dynamic_only = os.environ.get('INPUT_DYNAMIC-ONLY', 'true') == 'true'
 skip_shutdown = os.environ.get('INPUT_SKIP-SHUTDOWN', 'false') == 'true'
 server_config = os.environ.get('INPUT_SERVER-CONFIG', '')
+
+# Docker-specific parameters
+docker_image = os.environ.get('INPUT_DOCKER-IMAGE', '')
+docker_port = int(os.environ.get('INPUT_DOCKER-PORT', '8000'))
+docker_host_port = int(os.environ.get('INPUT_DOCKER-HOST-PORT', '8000'))
+docker_protocol = os.environ.get('INPUT_DOCKER-PROTOCOL', 'http')
+docker_env_str = os.environ.get('INPUT_DOCKER-ENV', '{}')
+docker_env = json.loads(docker_env_str)
+server_path = os.environ.get('INPUT_SERVER-PATH', '/mcp')
 
 # Create output directory
 os.makedirs(output_dir, exist_ok=True)
@@ -166,18 +205,78 @@ elif server_type.lower() == 'http':
         '--retry-interval', '3'
     ]
     
+elif server_type.lower() == 'docker':
+    if not docker_image:
+        print("Error: Docker image must be provided for Docker servers")
+        sys.exit(1)
+    
+    # Start Docker container
+    try:
+        print(f"Starting Docker container from image: {docker_image} with {docker_protocol} protocol")
+        
+        # Prepare command for docker_test.py script
+        cmd = [
+            'python', '-m', 'mcp_testing.scripts.docker_test',
+            '--docker-image', docker_image,
+            '--protocol', docker_protocol,
+            '--protocol-version', protocol_version,
+            '--output-dir', output_dir,
+            '--max-retries', '10',
+            '--retry-interval', '3'
+        ]
+        
+        # Add protocol-specific arguments
+        if docker_protocol.lower() == 'http':
+            cmd.extend([
+                '--container-port', str(docker_port),
+                '--host-port', str(docker_host_port),
+                '--server-path', server_path
+            ])
+        elif docker_protocol.lower() == 'stdio':
+            server_command = os.environ.get('INPUT_DOCKER-SERVER-COMMAND', '')
+            if not server_command:
+                print("Error: Server command must be provided for STDIO protocol in Docker")
+                sys.exit(1)
+                
+            cmd.extend(['--server-command', server_command])
+            
+            # Add working directory if provided
+            working_dir = os.environ.get('INPUT_DOCKER-WORKING-DIR', '')
+            if working_dir:
+                cmd.extend(['--working-dir', working_dir])
+        else:
+            print(f"Error: Unsupported Docker protocol: {docker_protocol}")
+            sys.exit(1)
+            
+        # Add additional arguments if provided
+        if docker_env_str != '{}':
+            cmd.extend(['--environment', docker_env_str])
+            
+        if dynamic_only:
+            cmd.append('--dynamic-only')
+            
+        if skip_shutdown:
+            cmd.append('--skip-shutdown')
+            
+        if debug:
+            cmd.append('--debug')
+            
+        # Run the docker test
+        print(f"Running MCP compliance tests with command: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        # Output the results
+        print(result.stdout)
+        if result.stderr:
+            print(f"Errors:\n{result.stderr}")
+            
+    except Exception as e:
+        print(f"Error: Failed to run Docker container test: {str(e)}")
+        sys.exit(1)
+    
 else:
     print(f"Error: Unknown server type: {server_type}")
     sys.exit(1)
-
-# Run the tests
-print(f"Running MCP compliance tests with command: {' '.join(cmd)}")
-result = subprocess.run(cmd, capture_output=True, text=True)
-
-# Output the results
-print(result.stdout)
-if result.stderr:
-    print(f"Errors:\n{result.stderr}")
 
 # Parse the compliance score from the output
 compliance_score = 0
@@ -328,7 +427,7 @@ Add this GitHub Action to your workflow file:
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| server-type | Type of MCP server (stdio or http) | Yes | http |
+| server-type | Type of MCP server (stdio, http, or docker) | Yes | http |
 | server-command | Command to start the server (for stdio servers) | For stdio | - |
 | server-url | URL of the HTTP server (for http servers) | For http | http://localhost:8000/mcp |
 | protocol-version | Protocol version to test against | No | 2025-03-26 |
@@ -337,6 +436,14 @@ Add this GitHub Action to your workflow file:
 | dynamic-only | Only run dynamic tests that adapt to server capabilities | No | true |
 | skip-shutdown | Skip shutdown method for servers that don't implement it | No | false |
 | output-dir | Directory to store report files | No | reports |
+| docker-image | Docker image name to run (for docker server-type) | For docker | - |
+| docker-port | Port the server listens on inside the container (for HTTP protocol) | For docker | 8000 |
+| docker-host-port | Port to map to on the host (for HTTP protocol) | For docker | 8000 |
+| docker-protocol | Protocol used by the Docker container (http or stdio) | For docker | http |
+| docker-server-command | Command to run inside container (for STDIO protocol) | For docker | - |
+| docker-working-dir | Working directory inside container (for STDIO protocol) | For docker | - |
+| docker-env | Environment variables for the Docker container (JSON format) | For docker | {} |
+| server-path | Path to the MCP endpoint (for HTTP servers) | For docker | /mcp |
 
 ## Outputs
 
@@ -404,21 +511,445 @@ jobs:
         protocol-version: '2025-03-26'
         skip-shutdown: 'true'
 ```
+
+### Docker Example
+
+```yaml
+name: MCP Protocol Compliance with Docker
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  validate-mcp-server:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install Docker
+      uses: docker/setup-docker@v2
+      with:
+        docker-version: '20.10'
+    
+    - name: Run MCP Compliance Tests
+      id: compliance
+      uses: mcp/protocol-validator@v1
+      with:
+        server-type: 'docker'
+        docker-image: 'your-org/mcp-server:latest'
+        docker-port: '8000'
+        docker-host-port: '8888'
+        docker-protocol: 'http'
+        docker-env: '{"MCP_DEBUG": "true", "MCP_CUSTOM_SETTING": "value"}'
+        protocol-version: '2025-03-26'
+        dynamic-only: 'true'
+    
+    - name: Upload Compliance Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: mcp-compliance-report
+        path: ${{ steps.compliance.outputs.report-path }}
+```
 ```
 
-## Benefits of the GitHub Action Approach
+## Docker Support for MCP Protocol Validation
 
-1. **Universal Testing**: Any MCP server implementation can be validated against the protocol specification.
+To make the MCP Protocol Validator more flexible, we'll add support for testing any MCP server by running it in Docker and validating against it. This approach offers several advantages:
 
-2. **Integration with CI/CD**: Automatically test protocol compliance on every PR or push.
+1. **Environment Isolation**: Test servers in isolated containers without affecting the local environment
+2. **Reproducibility**: Ensure consistent test environments across different systems
+3. **Broader Compatibility**: Test any server implementation regardless of language or dependencies
+4. **Simplified Setup**: Reduce setup complexity for server-specific requirements
 
-3. **Protocol Version Testing**: Ensure compatibility with specific MCP protocol versions.
+### 1. Update GitHub Action Definition
 
-4. **Detailed Reporting**: Generate comprehensive reports of test results.
+Add Docker-specific inputs to the GitHub Action, including STDIO support:
 
-5. **Dynamic Adaptation**: Tests adapt to each server's unique tool capabilities rather than enforcing fixed expectations.
+```yaml
+name: 'MCP Protocol Compliance Validator'
+description: 'Validate an MCP server implementation against protocol specifications'
+author: 'Scott Wilcox'
+inputs:
+  server-type:
+    description: 'Type of MCP server (stdio, http, or docker)'
+    required: true
+    default: 'http'
+  # Existing inputs...
+  docker-image:
+    description: 'Docker image name to run (for docker server-type)'
+    required: false
+  docker-port:
+    description: 'Port the server listens on inside the container (for HTTP protocol)'
+    required: false
+    default: '8000'
+  docker-host-port:
+    description: 'Port to map to on the host (for HTTP protocol)'
+    required: false
+    default: '8000'
+  docker-protocol:
+    description: 'Protocol used by the Docker container (http or stdio)'
+    required: false
+    default: 'http'
+  docker-server-command:
+    description: 'Command to run inside container (for STDIO protocol)'
+    required: false
+  docker-working-dir:
+    description: 'Working directory inside container (for STDIO protocol)'
+    required: false
+  docker-env:
+    description: 'Environment variables for the Docker container (JSON format)'
+    required: false
+    default: '{}'
+  server-path:
+    description: 'Path to the MCP endpoint (for HTTP servers)'
+    required: false
+    default: '/mcp'
+```
 
-6. **Configurable Testing**: Control which parts of the protocol are tested based on server features.
+### 2. Create Docker Transport Adapter
+
+Develop a new transport adapter specifically for Docker:
+
+```python
+# mcp_testing/transports/docker.py
+
+import docker
+import time
+import json
+from typing import Dict, Any, Optional
+
+from mcp_testing.transports.base import MCPTransportAdapter
+from mcp_testing.transports.http import HttpTransportAdapter
+
+class DockerTransportAdapter(MCPTransportAdapter):
+    """
+    Docker transport adapter for MCP testing.
+    
+    This adapter launches an MCP server in a Docker container and communicates 
+    with it via HTTP or forwards to another adapter.
+    """
+    
+    def __init__(self, image_name: str, container_port: int = 8000, 
+                 host_port: int = 8000, environment: Optional[Dict[str, str]] = None,
+                 timeout: float = 30.0, debug: bool = False,
+                 protocol: str = "http", server_path: str = "/mcp"):
+        """
+        Initialize the Docker transport adapter.
+        """
+        super().__init__(debug=debug)
+        self.image_name = image_name
+        self.container_port = container_port
+        self.host_port = host_port
+        self.environment = environment or {}
+        self.timeout = timeout
+        self.protocol = protocol
+        self.server_path = server_path
+        
+        self.client = docker.from_env()
+        self.container = None
+        
+        # HTTP adapter for communication if using HTTP
+        if self.protocol == "http":
+            self.http_adapter = HttpTransportAdapter(
+                server_url=f"http://localhost:{self.host_port}{self.server_path}",
+                timeout=self.timeout,
+                debug=self.debug
+            )
+    
+    def start(self) -> bool:
+        """Start the Docker container."""
+        # Implementation details...
+    
+    def stop(self) -> bool:
+        """Stop the Docker container."""
+        # Implementation details...
+    
+    def send_message(self, message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Send a message to the MCP server in the Docker container."""
+        # Implementation details...
+```
+
+### 3. Update Workflow Scripts
+
+Modify the validation script to handle Docker servers:
+
+```python
+# validate_mcp_server.py
+
+# Existing imports...
+import json
+import docker
+
+# Server type and parameters
+server_type = os.environ.get('INPUT_SERVER-TYPE', 'http')
+protocol_version = os.environ.get('INPUT_PROTOCOL-VERSION', '2025-03-26')
+output_dir = os.environ.get('INPUT_OUTPUT-DIR', 'reports')
+test_mode = os.environ.get('INPUT_TEST-MODE', 'all')
+dynamic_only = os.environ.get('INPUT_DYNAMIC-ONLY', 'true') == 'true'
+skip_shutdown = os.environ.get('INPUT_SKIP-SHUTDOWN', 'false') == 'true'
+server_config = os.environ.get('INPUT_SERVER-CONFIG', '')
+
+# Docker-specific parameters
+docker_image = os.environ.get('INPUT_DOCKER-IMAGE', '')
+docker_port = int(os.environ.get('INPUT_DOCKER-PORT', '8000'))
+docker_host_port = int(os.environ.get('INPUT_DOCKER-HOST-PORT', '8000'))
+docker_protocol = os.environ.get('INPUT_DOCKER-PROTOCOL', 'http')
+docker_env_str = os.environ.get('INPUT_DOCKER-ENV', '{}')
+docker_env = json.loads(docker_env_str)
+server_path = os.environ.get('INPUT_SERVER-PATH', '/mcp')
+
+# Create output directory
+os.makedirs(output_dir, exist_ok=True)
+
+# Determine which test script to run based on server type
+if server_type.lower() == 'stdio':
+    # Existing STDIO server logic...
+    
+elif server_type.lower() == 'http':
+    # Existing HTTP server logic...
+    
+elif server_type.lower() == 'docker':
+    if not docker_image:
+        print("Error: Docker image must be provided for Docker servers")
+        sys.exit(1)
+    
+    # Start Docker container
+    try:
+        print(f"Starting Docker container from image: {docker_image} with {docker_protocol} protocol")
+        
+        # Prepare command for docker_test.py script
+        cmd = [
+            'python', '-m', 'mcp_testing.scripts.docker_test',
+            '--docker-image', docker_image,
+            '--protocol', docker_protocol,
+            '--protocol-version', protocol_version,
+            '--output-dir', output_dir,
+            '--max-retries', '10',
+            '--retry-interval', '3'
+        ]
+        
+        # Add protocol-specific arguments
+        if docker_protocol.lower() == 'http':
+            cmd.extend([
+                '--container-port', str(docker_port),
+                '--host-port', str(docker_host_port),
+                '--server-path', server_path
+            ])
+        elif docker_protocol.lower() == 'stdio':
+            server_command = os.environ.get('INPUT_DOCKER-SERVER-COMMAND', '')
+            if not server_command:
+                print("Error: Server command must be provided for STDIO protocol in Docker")
+                sys.exit(1)
+                
+            cmd.extend(['--server-command', server_command])
+            
+            # Add working directory if provided
+            working_dir = os.environ.get('INPUT_DOCKER-WORKING-DIR', '')
+            if working_dir:
+                cmd.extend(['--working-dir', working_dir])
+        else:
+            print(f"Error: Unsupported Docker protocol: {docker_protocol}")
+            sys.exit(1)
+            
+        # Add additional arguments if provided
+        if docker_env_str != '{}':
+            cmd.extend(['--environment', docker_env_str])
+            
+        if dynamic_only:
+            cmd.append('--dynamic-only')
+            
+        if skip_shutdown:
+            cmd.append('--skip-shutdown')
+            
+        if debug:
+            cmd.append('--debug')
+            
+        # Run the docker test
+        print(f"Running MCP compliance tests with command: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        # Output the results
+        print(result.stdout)
+        if result.stderr:
+            print(f"Errors:\n{result.stderr}")
+            
+    except Exception as e:
+        print(f"Error: Failed to run Docker container test: {str(e)}")
+        sys.exit(1)
+    
+else:
+    print(f"Error: Unknown server type: {server_type}")
+    sys.exit(1)
+
+# Parse the compliance score from the output
+compliance_score = 0
+for line in result.stdout.splitlines():
+    if "Compliance Status:" in line and "%" in line:
+        try:
+            compliance_score = line.split("(")[1].split("%")[0]
+            break
+        except IndexError:
+            pass
+
+# Set the action outputs
+with open(os.environ.get('GITHUB_OUTPUT', ''), 'a') as f:
+    f.write(f"compliance-score={compliance_score}\n")
+    f.write(f"report-path={output_dir}\n")
+    f.write(f"status={'success' if result.returncode == 0 else 'failure'}\n")
+
+sys.exit(result.returncode)
+```
+
+### 4. Example Docker Workflow with HTTP Protocol
+
+```yaml
+name: MCP Protocol Compliance with Docker HTTP
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  validate-mcp-server:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install Docker
+      uses: docker/setup-docker@v2
+      with:
+        docker-version: '20.10'
+    
+    - name: Run MCP Compliance Tests
+      id: compliance
+      uses: mcp/protocol-validator@v1
+      with:
+        server-type: 'docker'
+        docker-image: 'your-org/mcp-server:latest'
+        docker-protocol: 'http'
+        docker-port: '8000'
+        docker-host-port: '8888'
+        docker-env: '{"MCP_DEBUG": "true", "MCP_CUSTOM_SETTING": "value"}'
+        protocol-version: '2025-03-26'
+        dynamic-only: 'true'
+    
+    - name: Upload Compliance Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: mcp-compliance-report
+        path: ${{ steps.compliance.outputs.report-path }}
+```
+
+### 5. Example Docker Workflow with STDIO Protocol
+
+```yaml
+name: MCP Protocol Compliance with Docker STDIO
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  validate-mcp-server:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install Docker
+      uses: docker/setup-docker@v2
+      with:
+        docker-version: '20.10'
+    
+    - name: Run MCP Compliance Tests
+      id: compliance
+      uses: mcp/protocol-validator@v1
+      with:
+        server-type: 'docker'
+        docker-image: 'your-org/mcp-stdio-server:latest'
+        docker-protocol: 'stdio'
+        docker-server-command: 'python /app/mcp_server.py'
+        docker-working-dir: '/app'
+        docker-env: '{"MCP_DEBUG": "true"}'
+        protocol-version: '2025-03-26'
+        dynamic-only: 'true'
+        skip-shutdown: 'true'
+    
+    - name: Upload Compliance Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: mcp-compliance-report
+        path: ${{ steps.compliance.outputs.report-path }}
+```
+
+### 6. Server Configuration for Docker
+
+Extend the server configuration format to support Docker-specific settings:
+
+```json
+{
+  "name": "Docker MCP Server",
+  "identifiers": ["docker-mcp-server"],
+  "description": "MCP server running in Docker",
+  "docker": {
+    "image": "mcp/server:latest",
+    "port": 8000,
+    "protocol": "http",
+    "environment": {
+      "MCP_DEBUG": "true",
+      "MCP_CUSTOM_SETTING": "value"
+    }
+  },
+  "environment": {},
+  "skip_tests": [],
+  "required_tools": ["echo", "add", "sleep"],
+  "recommended_protocol": "2025-03-26"
+}
+```
+
+### 7. Benefits of Docker Support
+
+1. **Cross-Platform Testing**: Test servers developed in any language or framework
+2. **Isolation**: Avoid conflicts with local environment and dependencies
+3. **Reproducibility**: Consistent testing environment across different systems
+4. **CI/CD Integration**: Simplified integration with continuous integration pipelines
+5. **Versioning**: Test against specific versions of server implementations
+6. **Security**: Run servers in isolated containers for better security
+
+### 8. Implementation Considerations
+
+1. **Performance**: Docker containers add some overhead, which may affect test performance
+2. **Resource Usage**: Running multiple Docker containers can consume significant system resources
+3. **Networking**: Proper port mapping is critical for HTTP-based servers
+4. **Security**: Docker containers should run with appropriate security constraints
+5. **Cleanup**: Ensure proper cleanup of containers, even if tests fail
 
 ## Conclusion
 

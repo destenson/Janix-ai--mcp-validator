@@ -242,11 +242,31 @@ class StdioTransportAdapter(MCPTransportAdapter):
             self.process.stdin.write(batch_str)
             self.process.stdin.flush()
             
-            # Read the response
-            response_str = self.process.stdout.readline().strip()
+            # Set up for non-blocking read with timeout
+            import select
+            import time
             
+            start_time = time.time()
+            response_str = ""
+            stdout_fd = self.process.stdout.fileno()
+            
+            # Wait for response with timeout
+            while time.time() - start_time < self.timeout:
+                # Check if data is available to read
+                ready, _, _ = select.select([stdout_fd], [], [], 0.1)
+                if ready:
+                    # Read available data
+                    line = self.process.stdout.readline().strip()
+                    if line:
+                        response_str = line
+                        break
+                
+                # Small sleep to prevent CPU spinning
+                time.sleep(0.05)
+            
+            # Check if we got a response
             if not response_str:
-                raise ConnectionError("No response received from server")
+                raise ConnectionError(f"No response received from server within {self.timeout} seconds")
                 
             if self.debug:
                 print(f"Received batch response: {response_str}")

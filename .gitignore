@@ -3,11 +3,14 @@ __pycache__/
 *.py[cod]
 *.pyo
 reports/*
+plan.md
+mcp_testing/server_configs/*
 
 # Virtual environment
 .venv/
 env/
 venv/
+test_notes.md
 
 # macOS metadata
 .DS_Store
