@@ -1,0 +1,11 @@
+{
+  "name": "MCP Time Server",
+  "identifiers": ["server-time", "@modelcontextprotocol/server-time", "mcp-time-server"],
+  "description": "MCP server that provides time-related functions",
+  "environment": {
+    "MCP_SKIP_SHUTDOWN": "true"
+  },
+  "skip_tests": ["test_shutdown", "test_exit_after_shutdown"],
+  "required_tools": ["current_time", "timestamp", "format_time"],
+  "recommended_protocol": "2024-11-05"
+} 

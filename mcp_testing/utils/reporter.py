@@ -11,6 +11,7 @@ from typing import Dict, Any, List
 import json
 from datetime import datetime
 import os
+import re
 
 # Import the specification coverage metrics
 try:
@@ -36,6 +37,45 @@ except ImportError:
         return coverage
 
 
+def extract_server_name(server_command: str) -> str:
+    """
+    Extract a clean server name from the server command.
+    
+    Args:
+        server_command: The command used to start the server
+        
+    Returns:
+        A clean server name suitable for display and filenames
+    """
+    # Extract the base command without paths
+    server_name = server_command.split("/")[-1] if "/" in server_command else server_command
+    
+    # Handle npm package commands
+    if "npx" in server_name and "@" in server_name:
+        # Extract the package name from something like 'npx -y @modelcontextprotocol/server-brave-search'
+        parts = server_name.split("@")
+        if len(parts) > 1:
+            # Extract the part after the @ symbol
+            package_parts = parts[1].split("/")
+            if len(package_parts) > 1:
+                server_name = package_parts[1]  # Get the part after the slash
+    else:
+        # For other commands, just use the first part (before any arguments)
+        server_name = server_name.split(" ")[0]
+    
+    # Handle Python scripts
+    if server_name.endswith(".py"):
+        # Extract the base name without extension
+        server_name = os.path.splitext(server_name)[0]
+    
+    # Clean up the name
+    server_name = server_name.replace("-", " ").replace("server ", "").replace("_", " ")
+    server_name = re.sub(r'\s+', ' ', server_name).strip()  # Normalize whitespace
+    
+    # Title case the name
+    return server_name.title()
+
+
 def generate_markdown_report(results: Dict[str, Any], server_command: str, protocol_version: str, server_config: Dict[str, Any] = None) -> str:
     """
     Generate a Markdown compliance report.
@@ -49,24 +89,44 @@ def generate_markdown_report(results: Dict[str, Any], server_command: str, proto
     Returns:
         A string containing the Markdown report
     """
-    # Extract server command details - use the base filename if it's a path
-    server_name = server_command.split("/")[-1] if "/" in server_command else server_command
+    # Get a clean server name for display
+    display_name = extract_server_name(server_command)
     
     # Get current date and time
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d %H:%M:%S")
     
-    # Start building the report
+    # Start building the report with server name at the top
     report = [
-        f"# MCP Compliance Report",
+        f"# {display_name} MCP Compliance Report",
         f"",
+    ]
+    
+    # Add server metadata
+    metadata = {"Server": display_name, "Version": protocol_version, "Date": date_str}
+    
+    # Extract additional metadata from server config
+    if server_config and isinstance(server_config, dict):
+        if "required_tools" in server_config:
+            tools = ", ".join(server_config["required_tools"])
+            metadata["Tools"] = tools
+    
+    # Add metadata table
+    report.append("| Metadata | Value |")
+    report.append("|----------|-------|")
+    for key, value in metadata.items():
+        report.append(f"| **{key}** | {value} |")
+    report.append("")
+    
+    # Continue with standard report sections
+    report.extend([
         f"## Server Information",
         f"",
         f"- **Server Command**: `{server_command}`",
         f"- **Protocol Version**: {protocol_version}",
         f"- **Test Date**: {date_str}",
         f"",
-    ]
+    ])
     
     # Add server config info if provided
     if server_config:

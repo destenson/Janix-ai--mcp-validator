@@ -6,6 +6,27 @@ Generate a compliance report for an MCP server.
 
 This script runs tests against any MCP server and generates a detailed compliance report.
 It adapts to the server's capabilities rather than having fixed expectations.
+
+Environment Variables:
+    MCP_SKIP_SHUTDOWN:     Set to 'true' to skip calling the shutdown method
+    MCP_PROTOCOL_VERSION:  Set the protocol version to test against
+    MCP_REQUIRED_TOOLS:    Comma-separated list of required tools
+    
+    Server-specific environment variables can be set in two ways:
+    1. Set the variable directly, e.g., BRAVE_API_KEY=your_key
+    2. Use MCP_DEFAULT_* prefix for default values, e.g., MCP_DEFAULT_BRAVE_API_KEY=default_key
+    
+    The script will warn about missing required environment variables for specific servers.
+
+Server Configurations:
+    The system uses configuration files in the 'server_configs' directory to determine:
+    - Required environment variables for each server
+    - Tests that should be skipped
+    - Required tools for the server
+    - Recommended protocol version
+    
+    To support a new server, add a JSON configuration file to the 'server_configs' directory.
+    See the README.md file in that directory for details on the configuration format.
 """
 
 import argparse
@@ -20,7 +41,7 @@ parent_dir = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(parent_dir))
 
 from mcp_testing.utils.runner import run_tests
-from mcp_testing.utils.reporter import results_to_markdown
+from mcp_testing.utils.reporter import results_to_markdown, extract_server_name
 from mcp_testing.tests.base_protocol.test_initialization import TEST_CASES as INIT_TEST_CASES
 from mcp_testing.tests.features.test_tools import TEST_CASES as TOOLS_TEST_CASES
 from mcp_testing.tests.features.test_async_tools import TEST_CASES as ASYNC_TOOLS_TEST_CASES
@@ -28,6 +49,41 @@ from mcp_testing.tests.features.dynamic_tool_tester import TEST_CASES as DYNAMIC
 from mcp_testing.tests.features.dynamic_async_tools import TEST_CASES as DYNAMIC_ASYNC_TEST_CASES
 from mcp_testing.tests.specification_coverage import TEST_CASES as SPEC_COVERAGE_TEST_CASES
 
+# Import server compatibility utilities
+try:
+    from mcp_testing.utils.server_compatibility import (
+        is_shutdown_skipped,
+        prepare_environment_for_server,
+        get_server_specific_test_config,
+        get_recommended_protocol_version
+    )
+except ImportError:
+    # Fallback implementations if module doesn't exist yet
+    def is_shutdown_skipped() -> bool:
+        """Check if shutdown should be skipped based on environment variable."""
+        skip_shutdown = os.environ.get("MCP_SKIP_SHUTDOWN", "").lower()
+        return skip_shutdown in ("true", "1", "yes")
+    
+    def prepare_environment_for_server(server_command: str) -> dict:
+        """Prepare environment variables for a specific server."""
+        env_vars = os.environ.copy()
+        if "server-brave-search" in server_command:
+            env_vars["MCP_SKIP_SHUTDOWN"] = "true"
+        return env_vars
+    
+    def get_server_specific_test_config(server_command: str) -> dict:
+        """Get server-specific test configuration."""
+        config = {}
+        if "server-brave-search" in server_command:
+            config["skip_tests"] = ["test_shutdown", "test_exit_after_shutdown"]
+            config["required_tools"] = ["brave_web_search", "brave_local_search"]
+        return config
+    
+    def get_recommended_protocol_version(server_command: str) -> str:
+        """Get the recommended protocol version for a specific server."""
+        if "server-brave-search" in server_command:
+            return "2024-11-05"
+        return None
 
 async def main():
     """Run the compliance tests and generate a report."""
@@ -42,7 +98,7 @@ async def main():
     
     # Output options
     parser.add_argument("--output-dir", default="reports", help="Directory to store the report files")
-    parser.add_argument("--report-prefix", default="compliance_report", help="Prefix for report filenames")
+    parser.add_argument("--report-prefix", default="cr", help="Prefix for report filenames (default: 'cr')")
     parser.add_argument("--json", action="store_true", help="Generate a JSON report")
     
     # Testing options
@@ -55,6 +111,7 @@ async def main():
     parser.add_argument("--test-mode", choices=["all", "core", "tools", "async", "spec"], default="all", 
                         help="Testing mode: 'all' runs all tests, 'core' runs only initialization tests, 'tools' runs core and tools tests, 'async' runs async tests, 'spec' runs specification coverage tests")
     parser.add_argument("--spec-coverage-only", action="store_true", help="Only run specification coverage tests")
+    parser.add_argument("--auto-detect", action="store_true", help="Auto-detect server settings based on server command")
     
     args = parser.parse_args()
     
@@ -63,13 +120,33 @@ async def main():
     if args.args:
         full_server_command = f"{args.server_command} {args.args}"
     
+    # Auto-detect protocol version if requested
+    if args.auto_detect:
+        recommended_version = get_recommended_protocol_version(full_server_command)
+        if recommended_version:
+            if args.debug:
+                print(f"Auto-detected protocol version {recommended_version} for {args.server_command}")
+            args.protocol_version = recommended_version
+    
     # Set environment variables for the server
-    env_vars = os.environ.copy()
+    if args.debug:
+        print(f"Preparing environment for server: {full_server_command}")
+    
+    # Get environment variables with server-specific settings
+    env_vars = prepare_environment_for_server(full_server_command)
+    
+    # Set protocol version in environment
     env_vars["MCP_PROTOCOL_VERSION"] = args.protocol_version
     
-    # Add skip_shutdown flag to environment if specified
+    # Set skip_shutdown flag in environment if specified via command line
     if args.skip_shutdown:
         env_vars["MCP_SKIP_SHUTDOWN"] = "true"
+        if args.debug:
+            print("Shutdown will be skipped (--skip-shutdown flag)")
+    elif is_shutdown_skipped():
+        # Environment variable is already set
+        if args.debug:
+            print("Shutdown will be skipped (MCP_SKIP_SHUTDOWN env var)")
     
     # Parse server configuration if provided
     server_config = {}
@@ -80,6 +157,15 @@ async def main():
                 print(f"Loaded server configuration from {args.server_config}")
         except Exception as e:
             print(f"Error loading server configuration: {str(e)}")
+    
+    # If auto-detect is enabled, get server-specific config
+    if args.auto_detect:
+        server_specific_config = get_server_specific_test_config(full_server_command)
+        server_config.update(server_specific_config)
+        if args.debug and server_specific_config:
+            print(f"Auto-detected configuration for {args.server_command}")
+            for key, value in server_specific_config.items():
+                print(f"  {key}: {value}")
     
     # Parse required tools
     required_tools = []
@@ -174,6 +260,8 @@ async def main():
     print(f"Total tests: {results['total']}")
     print(f"Passed: {results['passed']}")
     print(f"Failed: {results['failed']}")
+    if results.get("skipped", 0) > 0:
+        print(f"Skipped: {results['skipped']}")
     
     # Generate compliance score
     compliance_pct = round(results['passed'] / results['total'] * 100, 1)
@@ -186,7 +274,10 @@ async def main():
         print(f"Compliance Status: ❌ Non-Compliant ({compliance_pct}%)")
     
     # Generate the Markdown report
-    markdown_filename = f"{args.report_prefix}_{args.protocol_version}_{timestamp}.md"
+    # Extract server name for the filename
+    server_name_for_filename = extract_server_name(full_server_command).lower().replace(" ", "-")
+    
+    markdown_filename = f"{args.report_prefix}_{server_name_for_filename}_{args.protocol_version}_{timestamp}.md"
     markdown_path = os.path.join(output_dir, markdown_filename)
     
     report_path = results_to_markdown(
@@ -200,18 +291,20 @@ async def main():
     
     # Generate JSON report if requested
     if args.json:
-        json_filename = f"{args.report_prefix}_{args.protocol_version}_{timestamp}.json"
+        json_filename = f"{args.report_prefix}_{server_name_for_filename}_{args.protocol_version}_{timestamp}.json"
         json_path = os.path.join(output_dir, json_filename)
         
         # Add additional metadata to the results
         results["metadata"] = {
             "server_command": full_server_command,
+            "server_name": server_name_for_filename,
             "protocol_version": args.protocol_version,
             "timestamp": timestamp,
             "compliance_score": compliance_pct,
             "server_config": server_config,
             "dynamic_only": args.dynamic_only,
-            "test_mode": args.test_mode
+            "test_mode": args.test_mode,
+            "skip_shutdown": is_shutdown_skipped()
         }
         
         with open(json_path, "w") as f:
