@@ -51,15 +51,30 @@ python test_http_server.py --protocol-version 2024-11-05
 python test_http_server.py --debug
 ```
 
-You can also run compliance tests against the server using the MCP testing framework:
+### Comprehensive Compliance Testing
+
+You can run comprehensive compliance tests against the server using the MCP testing framework:
 
 ```bash
-# Run specification tests
-python -m mcp_testing.scripts.http_test --server-url http://localhost:8000 --protocol-version 2025-03-26
+# Run HTTP tests using the scripts directory module
+python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
 
-# Run capability tests
-python -m mcp_testing.scripts.http_test --server-url http://localhost:8000 --protocol-version 2025-03-26 --test-mode capability
+# Run HTTP tests using the executable script
+./mcp_testing/bin/http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
+
+# Generate a compliance report
+python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26 --output-dir ./reports
 ```
+
+The HTTP testing module tests the following aspects:
+- CORS support via OPTIONS requests
+- Session management via headers
+- Protocol initialization
+- Tools listing and execution
+- Asynchronous tool execution
+- Error handling and edge cases
+
+See the [HTTP Testing README](../mcp_testing/http/README.md) for more details on the testing capabilities.
 
 ## Manual Testing with curl
 
@@ -125,3 +140,9 @@ curl -X POST http://localhost:8000 \
 - Uses `parameters` for tool call parameters
 - Supports async tool calls via `tools/call-async`, `tools/result`, and `tools/cancel`
 - Supports resources via `resources/list` and `resources/get` 
+
+## License
+
+AGPL-3.0-or-later
+
+This server is provided as a reference implementation for educational purposes.

@@ -1,90 +1,99 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025 Scott Wilcox
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
-HTTP Test Script for MCP protocol.
+Run tests against an HTTP MCP server.
 
-This script runs tests against an MCP server using the HTTP transport.
+This script provides a command-line interface for testing an MCP HTTP server.
 """
 
 import argparse
-import asyncio
-import logging
 import os
 import sys
 from pathlib import Path
 
-# Add root directory to sys.path to import mcp_testing
-root_dir = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(root_dir))
+# Add the project root to the Python path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from mcp_testing.transports.http import HttpTransportAdapter
-from mcp_testing.scripts.compliance_report import run_compliance_report
+from mcp_testing.http.tester import MCPHttpTester
+from mcp_testing.http.utils import wait_for_server
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('http_test')
-
-
-async def main():
-    """Run the HTTP test."""
-    parser = argparse.ArgumentParser(
-        description="Run MCP protocol tests using HTTP transport"
+def main():
+    """Run compliance tests against an HTTP MCP server."""
+    parser = argparse.ArgumentParser(description="Run tests against an HTTP MCP server")
+    parser.add_argument(
+        "--server-url", 
+        default="http://localhost:9000/mcp",
+        help="URL of the MCP HTTP server (default: http://localhost:9000/mcp)"
     )
     parser.add_argument(
-        "--server-command",
-        help="Command to start the server (if not already running)",
-        required=False
-    )
-    parser.add_argument(
-        "--server-url",
-        default="http://localhost:8000",
-        help="URL of the MCP HTTP server (default: http://localhost:8000)"
-    )
-    parser.add_argument(
-        "--protocol-version",
-        choices=["2024-11-05", "2025-03-26"],
-        default="2025-03-26",
+        "--protocol-version", 
+        choices=["2024-11-05", "2025-03-26"], 
+        default="2025-03-26", 
         help="Protocol version to use (default: 2025-03-26)"
     )
     parser.add_argument(
-        "--test-mode",
-        choices=["spec", "capability"],
-        default="spec",
-        help="Test mode: spec for specification tests, capability for capability tests (default: spec)"
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
+        "--debug", 
+        action="store_true", 
         help="Enable debug logging"
     )
     parser.add_argument(
-        "--use-sse",
-        action="store_true",
-        help="Use Server-Sent Events for notifications"
+        "--output-dir", 
+        help="Directory to write test results"
+    )
+    parser.add_argument(
+        "--max-retries", 
+        type=int, 
+        default=3,
+        help="Maximum number of connection retries"
+    )
+    parser.add_argument(
+        "--retry-interval", 
+        type=int, 
+        default=2,
+        help="Seconds to wait between connection retries"
     )
     
     args = parser.parse_args()
     
-    if args.debug:
-        logger.setLevel(logging.DEBUG)
-        logging.getLogger('mcp_testing').setLevel(logging.DEBUG)
+    # Create output directory if needed
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
     
-    # Create the HTTP transport adapter
-    transport = HttpTransportAdapter(
-        server_command=args.server_command,
-        server_url=args.server_url,
-        debug=args.debug,
-        use_sse=args.use_sse
-    )
+    # Check server connection first
+    if not wait_for_server(
+        args.server_url, 
+        max_retries=args.max_retries, 
+        retry_interval=args.retry_interval
+    ):
+        return 1
     
-    # Run the compliance report
-    await run_compliance_report(
-        transport=transport,
-        protocol_version=args.protocol_version,
-        test_mode=args.test_mode
-    )
-
+    # Run the HTTP tests
+    tester = MCPHttpTester(args.server_url, args.debug)
+    tester.protocol_version = args.protocol_version
+    
+    success = tester.run_all_tests()
+    
+    # Generate report if needed
+    if args.output_dir:
+        report_path = os.path.join(args.output_dir, f"http_test_report_{args.protocol_version}.md")
+        
+        with open(report_path, "w") as f:
+            f.write(f"# MCP HTTP Compliance Test Report\n\n")
+            f.write(f"- Server: {args.server_url}\n")
+            f.write(f"- Protocol Version: {args.protocol_version}\n")
+            f.write(f"- Date: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            
+            f.write(f"## Test Results\n\n")
+            f.write(f"All tests {'PASSED' if success else 'FAILED'}\n\n")
+            
+            f.write(f"## Notes\n\n")
+            f.write(f"This report was generated using the MCP HTTP testing framework.\n")
+            f.write(f"For more detailed test results, run with the --debug flag.\n")
+        
+        print(f"Test report written to {report_path}")
+    
+    return 0 if success else 1
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    sys.exit(main()) 

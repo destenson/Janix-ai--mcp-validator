@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025 Scott Wilcox
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 Basic interaction script for testing MCP servers.
 This script initializes a connection with an MCP server and allows you to list available tools.

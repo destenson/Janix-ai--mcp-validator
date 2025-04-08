@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Scott Wilcox
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # MCP Testing Framework
 
 A modular and extensible testing framework for verifying MCP (Model Conversation Protocol) server implementations.
@@ -27,6 +30,7 @@ The framework includes comprehensive test coverage for all protocol features, in
 The `transports` module provides adapters for different communication mechanisms:
 
 - `stdio.py`: Communication via standard input/output
+- `http.py`: Communication via HTTP protocol (for HTTP-based MCP servers)
 - `base.py`: Base class defining the transport adapter interface
 
 ### Protocols
@@ -61,6 +65,47 @@ The `utils` module provides utility classes and functions:
 The `scripts` module provides command-line scripts for running tests:
 
 - `compliance_report.py`: Comprehensive script to test any MCP server and generate reports
+
+### HTTP Testing
+
+The `http` module provides specific functionality for testing HTTP-based MCP servers:
+
+- `tester.py`: Core testing class for HTTP servers
+- `utils.py`: Utilities for server connectivity and networking
+- `cli.py`: Command-line interface for HTTP testing
+
+#### Testing HTTP Servers
+
+You can test HTTP-based MCP servers using the dedicated tools:
+
+```bash
+# Using the bin script
+./bin/http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
+
+# Using the Python module
+python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
+```
+
+#### HTTP Testing Options
+
+- `--server-url`: URL of the HTTP MCP server (required)
+- `--protocol-version`: Protocol version to test (2024-11-05 or 2025-03-26)
+- `--debug`: Enable debug output
+- `--max-retries`: Maximum number of connection retries
+- `--retry-interval`: Seconds to wait between connection retries
+- `--output-dir`: Directory to store report files (http_test.py only)
+
+#### HTTP-Specific Tests
+
+The HTTP tester includes additional tests specific to the HTTP transport:
+
+- OPTIONS request handling (CORS headers)
+- Proper HTTP status codes
+- Session management via headers
+- Content type validation
+- HTTP-specific error handling
+
+See the [HTTP Testing README](http/README.md) for more details.
 
 ## Usage
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025 Scott Wilcox
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 Test script for the Minimal HTTP MCP Server.
 
