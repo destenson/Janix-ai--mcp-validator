@@ -16,6 +16,29 @@ The current implementation is fully compliant with the latest MCP protocol speci
 
 ✅ All tests pass for the reference implementations!
 
+## Repository Organization
+
+The repository is organized as follows:
+
+```
+.
+├── mcp_testing/                # Testing framework
+│   ├── bin/                    # Executable scripts
+│   ├── http/                   # HTTP testing module
+│   ├── protocols/              # Protocol version tests
+│   ├── scripts/                # Command-line tools
+│   ├── stdio/                  # STDIO testing module
+│   ├── transports/             # Transport layer implementations
+│   └── utils/                  # Shared utilities
+├── minimal_http_server/        # HTTP server reference implementation
+├── minimal_mcp_server/         # STDIO server reference implementation
+├── reports/                    # Generated test reports
+├── schema/                     # JSON Schema definitions
+└── specification/              # Protocol specifications
+```
+
+Each directory contains its own README with specific documentation.
+
 ## Minimal MCP Server (STDIO)
 
 A simple reference implementation of an MCP server that uses STDIO for transport and supports all protocol features:

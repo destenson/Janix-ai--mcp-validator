@@ -7,10 +7,11 @@ MCP HTTP Server Tester
 A class for testing MCP HTTP server implementations.
 """
 
-import http.client
 import json
-import time
 import uuid
+import http.client
+import socket
+import time
 from urllib.parse import urlparse
 
 class MCPHttpTester:
@@ -81,7 +82,7 @@ class MCPHttpTester:
         # Set up headers
         all_headers = {
             "Content-Type": "application/json",
-            "Accept": "application/json"
+            "Accept": "application/json, text/event-stream"  # Add text/event-stream for better compatibility
         }
         
         # Add session ID if we have one and this isn't an initialize request
@@ -93,7 +94,7 @@ class MCPHttpTester:
             all_headers.update(headers)
         
         # Send the request
-        conn = http.client.HTTPConnection(self.host, timeout=30)
+        conn = http.client.HTTPConnection(self.host, timeout=10)  # Reduce timeout to 10 seconds
         
         if request_method == "OPTIONS":
             conn.request(request_method, self.path, headers=all_headers)
@@ -135,27 +136,51 @@ class MCPHttpTester:
         """Send an OPTIONS request to check server CORS support."""
         print("Testing OPTIONS request...")
         
-        status, headers, _ = self.send_request(None, request_method="OPTIONS")
-        
-        if status != 200:
-            print(f"ERROR: OPTIONS request failed with status {status}")
+        try:
+            # Use a direct connection with a shorter timeout specifically for OPTIONS
+            conn = http.client.HTTPConnection(self.host, timeout=5)
+            conn.request("OPTIONS", self.path, headers={
+                "Accept": "application/json, text/event-stream"
+            })
+            
+            # Get the response
+            resp = conn.getresponse()
+            status = resp.status
+            
+            # Get headers
+            headers = {}
+            for header in resp.getheaders():
+                headers[header[0].lower()] = header[1]
+            
+            # Read and discard body
+            resp.read()
+            conn.close()
+            
+            if status != 200:
+                print(f"ERROR: OPTIONS request failed with status {status}")
+                return False
+            
+            # Check CORS headers
+            if 'access-control-allow-origin' not in headers:
+                print("ERROR: Missing Access-Control-Allow-Origin header")
+                return False
+            
+            if 'access-control-allow-methods' not in headers:
+                print("ERROR: Missing Access-Control-Allow-Methods header")
+                return False
+            
+            if 'access-control-allow-headers' not in headers:
+                print("ERROR: Missing Access-Control-Allow-Headers header")
+                return False
+            
+            print("OPTIONS request successful")
+            return True
+            
+        except (http.client.HTTPException, socket.error) as e:
+            print(f"ERROR: OPTIONS request failed with exception: {str(e)}")
+            # Continue with other tests even if OPTIONS fails
+            print("Continuing with other tests...")
             return False
-        
-        # Check CORS headers
-        if 'access-control-allow-origin' not in headers:
-            print("ERROR: Missing Access-Control-Allow-Origin header")
-            return False
-        
-        if 'access-control-allow-methods' not in headers:
-            print("ERROR: Missing Access-Control-Allow-Methods header")
-            return False
-        
-        if 'access-control-allow-headers' not in headers:
-            print("ERROR: Missing Access-Control-Allow-Headers header")
-            return False
-        
-        print("OPTIONS request successful")
-        return True
     
     def initialize(self):
         """Initialize the server and store the session ID."""
@@ -178,6 +203,26 @@ class MCPHttpTester:
         if status != 200:
             print(f"ERROR: Initialize request failed with status {status}")
             return False
+        
+        # Handle the case where the server is already initialized
+        if isinstance(body, dict) and 'error' in body:
+            error = body['error']
+            if error.get('code') == -32803 and "already initialized" in error.get('message', ''):
+                print("Server already initialized, continuing with tests...")
+                # We need to retry the initialize call to get the session ID
+                print("Attempting to get a session ID...")
+                # Try calling server/info to get a session ID
+                status, headers, _ = self.send_request("server/info")
+                if 'mcp-session-id' not in headers:
+                    print("ERROR: Could not retrieve session ID")
+                    return False
+                self.session_id = headers['mcp-session-id']
+                print(f"Retrieved session ID: {self.session_id}")
+                self.initialized = True
+                return True
+            else:
+                print(f"ERROR: Server returned error: {error}")
+                return False
         
         # Check for session ID in headers
         if 'mcp-session-id' not in headers:
@@ -431,9 +476,44 @@ class MCPHttpTester:
         print("Async sleep tool test successful")
         return True
     
+    def reset_server(self):
+        """Try to reset the server by sending a shutdown request."""
+        print("Attempting to reset server state...")
+        try:
+            conn = http.client.HTTPConnection(self.host, timeout=5)
+            headers = {"Content-Type": "application/json"}
+            
+            # Send a shutdown request without a session ID
+            request = {
+                "jsonrpc": "2.0",
+                "method": "shutdown",
+                "id": str(uuid.uuid4())
+            }
+            json_str = json.dumps(request)
+            
+            conn.request("POST", self.path, body=json_str, headers=headers)
+            
+            # Get and discard the response
+            resp = conn.getresponse()
+            resp.read()
+            conn.close()
+            
+            # Wait a brief moment for the server to process the shutdown
+            time.sleep(1)
+            
+            print("Server reset attempted, continuing with tests")
+            return True
+        except Exception as e:
+            print(f"Server reset attempt failed: {str(e)}")
+            print("Continuing with tests anyway")
+            return False
+
     def run_all_tests(self):
         """Run all tests in sequence."""
         print(f"Running all tests against {self.url}")
+        
+        # Try to reset the server state first
+        self.reset_server()
         
         tests = [
             ("OPTIONS request", self.options_request),

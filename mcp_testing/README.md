@@ -3,7 +3,116 @@
 
 # MCP Testing Framework
 
-A modular and extensible testing framework for verifying MCP (Model Conversation Protocol) server implementations.
+A comprehensive testing framework for validating servers that implement the [Model Conversation Protocol (MCP)](https://github.com/microsoft/aimcp).
+
+## Framework Architecture
+
+The testing framework is organized into several key components:
+
+### 1. Protocol Modules
+
+Located in `./protocols/`:
+
+- **base.py**: Base protocol testing functionality
+- **v2024_11_05.py**: Tests for the 2024-11-05 protocol version
+- **v2025_03_26.py**: Tests for the 2025-03-26 protocol version
+
+### 2. Transport Modules
+
+Located in `./transports/`:
+
+- **base.py**: Base transport layer functionality
+- **stdio.py**: Implementation for STDIO transport
+- **http.py**: Implementation for HTTP transport
+
+### 3. Specialized Testing Modules
+
+- **./http/**: Comprehensive HTTP testing module
+- **./stdio/**: Comprehensive STDIO testing module
+- **./utils/**: Shared utility functions
+- **./bin/**: Executable test scripts
+- **./scripts/**: Command-line testing tools
+
+## Usage Examples
+
+### Using STDIO Testing
+
+```python
+from mcp_testing.stdio.tester import MCPStdioTester
+
+# Create a tester instance
+tester = MCPStdioTester("python /path/to/server.py", debug=True)
+
+# Run all tests
+success = tester.run_all_tests()
+
+# Or run specific tests
+tester.start_server()
+tester.initialize()
+tester.list_tools()
+tester.test_echo_tool()
+tester.stop_server()
+```
+
+### Using HTTP Testing
+
+```python
+from mcp_testing.http.tester import MCPHttpTester
+from mcp_testing.http.utils import wait_for_server
+
+# Wait for server to be accessible
+if wait_for_server("http://localhost:9000/mcp"):
+    # Create a tester instance
+    tester = MCPHttpTester("http://localhost:9000/mcp", debug=True)
+    
+    # Run all tests
+    success = tester.run_all_tests()
+    
+    # Or run specific tests
+    tester.initialize()
+    tester.list_tools()
+    tester.test_echo_tool()
+```
+
+### Using the Transport Layer Directly
+
+```python
+from mcp_testing.transports.http import HTTPTransport
+from mcp_testing.transports.stdio import STDIOTransport
+
+# Create a transport instance
+http_transport = HTTPTransport("http://localhost:9000/mcp")
+stdio_transport = STDIOTransport("python /path/to/server.py")
+
+# Use the transport
+http_transport.initialize()
+stdio_transport.initialize()
+```
+
+## Adding New Tests
+
+To add new tests to the framework:
+
+1. Identify the appropriate component (protocol version, transport layer, etc.)
+2. Add new test methods following the established patterns
+3. Update the `run_all_tests` method to include your new tests
+4. Add documentation about the new tests
+
+## Directory Structure
+
+```
+mcp_testing/
+├── __init__.py
+├── bin/               # Executable scripts
+├── http/              # HTTP testing module
+├── protocols/         # Protocol version tests
+├── scripts/           # Command-line tools
+├── stdio/             # STDIO testing module
+├── transports/        # Transport layer implementations
+└── utils/             # Shared utilities
+```
+
+See the subdirectory README files for more detailed information about each component.
 
 ## Overview
 
