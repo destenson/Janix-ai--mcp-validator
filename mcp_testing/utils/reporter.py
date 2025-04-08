@@ -11,6 +11,7 @@ from typing import Dict, Any, List
 import json
 from datetime import datetime
 import os
+import re
 
 # Import the specification coverage metrics
 try:
@@ -36,6 +37,45 @@ except ImportError:
         return coverage
 
 
+def extract_server_name(server_command: str) -> str:
+    """
+    Extract a clean server name from the server command.
+    
+    Args:
+        server_command: The command used to start the server
+        
+    Returns:
+        A clean server name suitable for display and filenames
+    """
+    # Extract the base command without paths
+    server_name = server_command.split("/")[-1] if "/" in server_command else server_command
+    
+    # Handle npm package commands
+    if "npx" in server_name and "@" in server_name:
+        # Extract the package name from something like 'npx -y @modelcontextprotocol/server-brave-search'
+        parts = server_name.split("@")
+        if len(parts) > 1:
+            # Extract the part after the @ symbol
+            package_parts = parts[1].split("/")
+            if len(package_parts) > 1:
+                server_name = package_parts[1]  # Get the part after the slash
+    else:
+        # For other commands, just use the first part (before any arguments)
+        server_name = server_name.split(" ")[0]
+    
+    # Handle Python scripts
+    if server_name.endswith(".py"):
+        # Extract the base name without extension
+        server_name = os.path.splitext(server_name)[0]
+    
+    # Clean up the name
+    server_name = server_name.replace("-", " ").replace("server ", "").replace("_", " ")
+    server_name = re.sub(r'\s+', ' ', server_name).strip()  # Normalize whitespace
+    
+    # Title case the name
+    return server_name.title()
+
+
 def generate_markdown_report(results: Dict[str, Any], server_command: str, protocol_version: str, server_config: Dict[str, Any] = None) -> str:
     """
     Generate a Markdown compliance report.
@@ -49,24 +89,8 @@ def generate_markdown_report(results: Dict[str, Any], server_command: str, proto
     Returns:
         A string containing the Markdown report
     """
-    # Extract server command details - use the base filename if it's a path
-    server_name = server_command.split("/")[-1] if "/" in server_command else server_command
-    
-    # Extract server name more cleanly from the command
-    if "npx" in server_name and "@" in server_name:
-        # For npm packages like 'npx -y @modelcontextprotocol/server-brave-search'
-        parts = server_name.split("@")
-        if len(parts) > 1:
-            # Extract the package name after the @ symbol
-            package_parts = parts[1].split("/")
-            if len(package_parts) > 1:
-                server_name = package_parts[1]  # Get the part after the slash
-    else:
-        # For other commands, just use the last part of the path
-        server_name = server_name.split(" ")[0]  # Get the first part before any arguments
-    
-    # Format the server name for display
-    display_name = server_name.replace("-", " ").replace("server ", "").title()
+    # Get a clean server name for display
+    display_name = extract_server_name(server_command)
     
     # Get current date and time
     now = datetime.now()

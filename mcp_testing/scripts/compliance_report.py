@@ -41,7 +41,7 @@ parent_dir = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(parent_dir))
 
 from mcp_testing.utils.runner import run_tests
-from mcp_testing.utils.reporter import results_to_markdown
+from mcp_testing.utils.reporter import results_to_markdown, extract_server_name
 from mcp_testing.tests.base_protocol.test_initialization import TEST_CASES as INIT_TEST_CASES
 from mcp_testing.tests.features.test_tools import TEST_CASES as TOOLS_TEST_CASES
 from mcp_testing.tests.features.test_async_tools import TEST_CASES as ASYNC_TOOLS_TEST_CASES
@@ -98,7 +98,7 @@ async def main():
     
     # Output options
     parser.add_argument("--output-dir", default="reports", help="Directory to store the report files")
-    parser.add_argument("--report-prefix", default="compliance_report", help="Prefix for report filenames")
+    parser.add_argument("--report-prefix", default="cr", help="Prefix for report filenames (default: 'cr')")
     parser.add_argument("--json", action="store_true", help="Generate a JSON report")
     
     # Testing options
@@ -274,7 +274,10 @@ async def main():
         print(f"Compliance Status: ❌ Non-Compliant ({compliance_pct}%)")
     
     # Generate the Markdown report
-    markdown_filename = f"{args.report_prefix}_{args.protocol_version}_{timestamp}.md"
+    # Extract server name for the filename
+    server_name_for_filename = extract_server_name(full_server_command).lower().replace(" ", "-")
+    
+    markdown_filename = f"{args.report_prefix}_{server_name_for_filename}_{args.protocol_version}_{timestamp}.md"
     markdown_path = os.path.join(output_dir, markdown_filename)
     
     report_path = results_to_markdown(
@@ -288,12 +291,13 @@ async def main():
     
     # Generate JSON report if requested
     if args.json:
-        json_filename = f"{args.report_prefix}_{args.protocol_version}_{timestamp}.json"
+        json_filename = f"{args.report_prefix}_{server_name_for_filename}_{args.protocol_version}_{timestamp}.json"
         json_path = os.path.join(output_dir, json_filename)
         
         # Add additional metadata to the results
         results["metadata"] = {
             "server_command": full_server_command,
+            "server_name": server_name_for_filename,
             "protocol_version": args.protocol_version,
             "timestamp": timestamp,
             "compliance_score": compliance_pct,
