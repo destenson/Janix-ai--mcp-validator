@@ -1,0 +1,53 @@
+{
+  "name": "Docker MCP Server Example",
+  "identifiers": ["docker-mcp-server", "mcp-server-docker"],
+  "description": "Example configuration for an MCP server running in Docker",
+  "docker": {
+    "image": "mcp/server:latest",
+    "protocol": "http",
+    "port": 8000,
+    "host_port": 8888,
+    "server_path": "/mcp",
+    "server_command": "python /app/mcp_server.py",
+    "working_dir": "/app",
+    "environment": {
+      "MCP_DEBUG": "true",
+      "MCP_TOOL_TIMEOUT": "10000"
+    },
+    "volumes": {
+      "/path/on/host": {
+        "bind": "/path/in/container",
+        "mode": "ro"
+      }
+    },
+    "network": "bridge"
+  },
+  "environment": {
+    "MCP_SKIP_SHUTDOWN": "true"
+  },
+  "skip_tests": ["test_shutdown", "test_exit_after_shutdown"],
+  "required_tools": ["echo", "add", "sleep", "list_directory"],
+  "recommended_protocol": "2025-03-26",
+  "examples": {
+    "http_example": {
+      "docker_image": "mcp/http-server:latest",
+      "protocol": "http",
+      "container_port": 8000,
+      "host_port": 8888,
+      "server_path": "/mcp",
+      "environment": {
+        "MCP_HTTP_PORT": "8000",
+        "MCP_DEBUG": "true"
+      }
+    },
+    "stdio_example": {
+      "docker_image": "mcp/stdio-server:latest",
+      "protocol": "stdio",
+      "server_command": "python /app/mcp_server.py",
+      "working_dir": "/app",
+      "environment": {
+        "MCP_DEBUG": "true"
+      }
+    }
+  }
+} 

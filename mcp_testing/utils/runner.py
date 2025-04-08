@@ -89,6 +89,11 @@ class MCPTestRunner:
             print(f"\nRunning test: {test_name}")
         
         # Create a fresh transport adapter for each test
+        if self.debug:
+            print(f"Starting server process: {server_command}")
+            if env_vars:
+                print(f"Environment variables: {env_vars}")
+                
         transport_adapter = StdioTransportAdapter(
             server_command=server_command,
             env_vars=env_vars,
@@ -113,11 +118,27 @@ class MCPTestRunner:
         
         try:
             # Initialize the connection
+            if self.debug:
+                print(f"Initializing server...")
+                
             await protocol_adapter.initialize()
+            
+            if self.debug:
+                print(f"Sending initialized notification...")
+                
             await protocol_adapter.send_initialized()
             
             # Run the test
+            if self.debug:
+                print(f"Executing test: {test_name}")
+                
             passed, message = await test_func(protocol_adapter)
+            
+            if self.debug:
+                status = "PASSED" if passed else "FAILED"
+                print(f"Test execution complete: {status}")
+                if message:
+                    print(f"  Message: {message}")
             
             # Determine whether to skip shutdown based on environment variables
             # This respects both env_vars argument and global environment
@@ -129,7 +150,14 @@ class MCPTestRunner:
             # Handle shutdown based on configuration
             if not skip_shutdown:
                 try:
+                    if self.debug:
+                        print(f"Sending shutdown request...")
+                        
                     await protocol_adapter.shutdown()
+                    
+                    if self.debug:
+                        print(f"Sending exit notification...")
+                        
                     await protocol_adapter.exit()
                 except Exception as e:
                     if self.debug:
@@ -141,6 +169,9 @@ class MCPTestRunner:
                 if self.debug:
                     print(f"Skipping shutdown call as configured")
                 try:
+                    if self.debug:
+                        print(f"Sending exit notification...")
+                        
                     await protocol_adapter.exit()
                 except Exception as e:
                     if self.debug:
@@ -187,6 +218,9 @@ class MCPTestRunner:
             return result
         finally:
             # Always stop the transport when done
+            if self.debug:
+                print(f"Stopping server process...")
+                
             transport_adapter.stop()
     
     async def run_tests(self, tests: List[Tuple[Callable[[MCPProtocolAdapter], Tuple[bool, str]], str]], 

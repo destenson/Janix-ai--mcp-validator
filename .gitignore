@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 reports/*
+plan.md
 
 # Virtual environment
 .venv/
