@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 reports/*
 plan.md
+mcp_testing/server_configs/*
 
 # Virtual environment
 .venv/

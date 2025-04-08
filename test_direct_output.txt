@@ -1,0 +1,5 @@
+Starting direct test of Fetch MCP server
+Running command: /tmp/fetch_venv/bin/python -m mcp_server_fetch
+Server started with PID 64227
+Sending request: {"jsonrpc": "2.0", "id": "init", "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "TestClient", "version": "1.0.0"}}}
+Got response: {"jsonrpc":"2.0","id":"init","result":{"protocolVersion":"2024-11-05","capabilities":{"experimental":{},"prompts":{"listChanged":false},"tools":{"listChanged":false}},"serverInfo":{"name":"mcp-fetch","version":"1.6.0"}}}
