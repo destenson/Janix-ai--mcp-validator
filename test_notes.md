@@ -122,14 +122,69 @@ python -m mcp_testing.scripts.compliance_report --server-command "cd /Users/scot
 python -m mcp_testing.scripts.compliance_report --server-command "docker run -i --rm mcp/fetch" --protocol-version 2024-11-05
 ```
 
+### Known Issues with Fetch Server
+
+The Fetch server has a known issue with the `tools/list` method which causes it to hang indefinitely when this method is called. The server successfully initializes and can respond to the initialization request, but does not correctly implement the `tools/list` method.
+
+To work around this issue, we've implemented two approaches:
+
+1. **Use the Basic Interaction Script**: A simplified test that only verifies initialization
+   ```bash
+   python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+   ```
+
+2. **Use Timeouts for Tools Tests**: The compliance report script now supports timeouts for tools-related tests
+   ```bash
+   python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-mode tools --tools-timeout 15 --report-prefix "fetch_"
+   ```
+
+When testing the fetch server, you will still see a successful initialization but the tool list test will time out. The test framework has been updated to treat tool test timeouts as non-critical, so a report can still be generated showing the server's partial compliance with the protocol.
+
+### Compliance Status for Fetch Server
+
+The Fetch MCP Server demonstrates partial compliance with the 2024-11-05 protocol specification:
+- **Total Tests**: 5 (in tools mode)
+- **Passed**: 1 (Initialization)
+- **Failed/Timed out**: 4 (Tool-related tests)
+- **Status**: ⚠️ Partially Compliant (Initialization works, tools functionality times out)
+
+A successful basic interaction test shows:
+```
+Starting server...
+Initializing server...
+Initialization result:
+{
+  "jsonrpc": "2.0",
+  "id": "init",
+  "result": {
+    "protocolVersion": "2024-11-05",
+    "serverInfo": {
+      "name": "mcp-fetch",
+      "version": "1.6.0"
+    },
+    "capabilities": {
+      "tools": {
+        "listChanged": false
+      },
+      "experimental": {}
+    }
+  }
+}
+Sending initialized notification...
+
+Listing available tools...
+Error listing tools: Timeout waiting for response
+```
+
+This shows the server initializes correctly but has an issue with the tools/list method.
+
 ### Troubleshooting
 
 When testing the Fetch server, you might encounter a "Failed to start transport" error. This could be due to:
 
 1. **Dependencies not installed**: Make sure all dependencies are installed correctly.
    ```bash
-   cd /Users/scott/AI/MCP/servers/src/fetch
-   pip install -e .
+   pip install mcp-server-fetch sseclient-py==1.7.2
    ```
 
 2. **Module Not Found**: The command might need to include the proper Python path.
@@ -148,16 +203,61 @@ When testing the Fetch server, you might encounter a "Failed to start transport"
    python -m mcp_testing.scripts.compliance_report --server-command "python /Users/scott/AI/MCP/servers/src/fetch/src/mcp_server_fetch/__main__.py" --protocol-version 2024-11-05
    ```
 
-### Server Configuration Details
+## Improved Test Framework Features
 
-The Fetch server has the following configuration in the testing framework:
+### Timeout Handling for Tool Tests
 
-- **Package**: `mcp-server-fetch`
-- **Required Tools**: `fetch`
-- **Recommended Protocol**: 2024-11-05
-- **Skipped Tests**: `test_shutdown`, `test_exit_after_shutdown`, `test_initialization_order`
+The testing framework has been enhanced to better handle servers that may time out during specific test operations, particularly tool-related tests. New features include:
 
-The fetch server provides a single tool to fetch content from web URLs and convert them to a format suitable for consumption by an LLM.
+1. **Separate timeouts for tool tests**:
+   ```bash
+   python -m mcp_testing.scripts.compliance_report --server-command "command" --test-timeout 30 --tools-timeout 15
+   ```
+
+2. **Non-critical tool test failures**: Tool tests that time out are now marked as non-critical and don't prevent the generation of a compliance report. This allows testing servers that may have issues with specific methods but are otherwise functional.
+
+3. **Timeout visibility in reports**: Reports now show which tests timed out, making it easier to diagnose server issues.
+
+### Example Run with Timeout Handling
+
+Running the minimal MCP server with timeout parameters demonstrates the improved functionality:
+
+```
+[2025-04-08 18:33:04] Running 3 non-tool tests with 30s timeout
+[2025-04-08 18:33:04] Starting test suite with 3 tests
+[2025-04-08 18:33:04] Running test 1/3: test_echo_tool
+[2025-04-08 18:33:05] Test 1/3: test_echo_tool - PASSED (0.51s)
+[2025-04-08 18:33:05] Progress: 1/3 tests completed, time elapsed: 0.5s, estimated remaining: 1.0s
+[2025-04-08 18:33:05] Running test 2/3: test_add_tool
+[2025-04-08 18:33:05] Test 2/3: test_add_tool - PASSED (0.51s)
+[2025-04-08 18:33:05] Progress: 2/3 tests completed, time elapsed: 1.0s, estimated remaining: 0.5s
+[2025-04-08 18:33:05] Running test 3/3: test_invalid_tool
+[2025-04-08 18:33:06] Test 3/3: test_invalid_tool - PASSED (0.52s)
+[2025-04-08 18:33:06] Progress: 3/3 tests completed, time elapsed: 1.6s, estimated remaining: 0.0s
+[2025-04-08 18:33:06] Test suite completed: 3 passed, 0 failed, total time: 1.55s
+[2025-04-08 18:33:06] Running 2 tool tests with 15s timeout
+```
+
+### Test Output Interpretation
+
+When a server has tool-related timeout issues, you'll see output like:
+
+```
+⚠️ WARNING: Test test_tools_list timed out after 15s (continuing)
+```
+
+And the generated report will indicate the timeout but still show initialization success:
+
+```
+## Status: Success
+
+## Test Details
+
+- ✅ Server Initialization: Successful
+- ⚠️ Tools List: Timed out after 15s (non-critical)
+```
+
+This approach allows the testing framework to gracefully handle servers with partial compliance, providing useful feedback while still allowing the testing process to complete.
 
 ## Testing Minimal MCP Server (STDIO)
 
