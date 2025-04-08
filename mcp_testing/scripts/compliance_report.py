@@ -108,10 +108,30 @@ class VerboseTestRunner:
         
         from mcp_testing.utils.runner import MCPTestRunner
         runner = MCPTestRunner(debug=self.debug)
-        result = await runner.run_test(test_func, server_command, protocol_version, test_name, env_vars)
-        
+        try:
+            result = await runner.run_test(test_func, server_command, protocol_version, test_name, env_vars)
+        except Exception as e:
+            # Handle exceptions that might occur during test execution
+            result = {
+                "name": test_name,
+                "passed": False,
+                "message": f"Test runner exception: {str(e)}",
+                "duration": time.time() - test_start_time
+            }
+            
         test_end_time = time.time()
         elapsed = test_end_time - test_start_time
+        
+        # Ensure result is a dictionary
+        if not isinstance(result, dict):
+            log_with_timestamp(f"Warning: Test {test_name} returned non-dictionary result: {result}")
+            result = {
+                "name": test_name,
+                "passed": False,
+                "message": f"Invalid test result: {str(result)}",
+                "duration": elapsed
+            }
+        
         status = "PASSED" if result.get("passed", False) else "FAILED"
         if result.get("skipped", False):
             status = "SKIPPED"
@@ -139,9 +159,18 @@ class VerboseTestRunner:
             test_results.append(result)
             
         total_time = time.time() - self.start_time
-        passed = sum(1 for r in test_results if r.get("passed", False))
+        
+        # Count passed and failed tests, handling non-dictionary results
+        passed = 0
+        skipped = 0
+        for r in test_results:
+            if isinstance(r, dict):
+                if r.get("passed", False):
+                    passed += 1
+                if r.get("skipped", False):
+                    skipped += 1
+        
         failed = total_tests - passed
-        skipped = sum(1 for r in test_results if r.get("skipped", False))
         
         log_with_timestamp(f"Test suite completed: {passed} passed, {failed} failed, total time: {total_time:.2f}s")
         
@@ -327,7 +356,10 @@ async def main():
     else:
         # Handle case where results might be a list of individual test results
         total_tests = len(results)
-        passed_tests = sum(1 for r in results if r.get("passed", False))
+        passed_tests = 0
+        for r in results:
+            if isinstance(r, dict) and r.get("passed", False):
+                passed_tests += 1
         failed_tests = total_tests - passed_tests
         # Convert to dictionary format
         results = {
@@ -433,7 +465,11 @@ async def main():
         ])
         
         # Add passed tests
-        passed_tests = [r for r in results['results'] if r.get('passed', False)]
+        passed_tests = []
+        for r in results['results']:
+            if isinstance(r, dict) and r.get('passed', False):
+                passed_tests.append(r)
+        
         if passed_tests:
             markdown_lines.append("| Test | Duration | Message |")
             markdown_lines.append("|------|----------|---------|")
@@ -452,7 +488,19 @@ async def main():
         ])
         
         # Add failed tests
-        failed_tests = [r for r in results['results'] if not r.get('passed', False)]
+        failed_tests = []
+        for r in results['results']:
+            if isinstance(r, dict) and not r.get('passed', False):
+                failed_tests.append(r)
+            elif not isinstance(r, dict):
+                # Handle non-dictionary results (like strings)
+                failed_tests.append({
+                    "name": "Unknown Test",
+                    "passed": False,
+                    "message": f"Invalid test result format: {str(r)}",
+                    "duration": 0
+                })
+        
         if failed_tests:
             markdown_lines.append("| Test | Duration | Error Message |")
             markdown_lines.append("|------|----------|--------------|")
