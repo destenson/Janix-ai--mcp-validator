@@ -1,0 +1,6 @@
+[flake8]
+# E501: Line too long
+# F824: Unused 'global xxx' - there's a specific case in the HTTP server that is a false positive
+ignore = E501, F824
+max-line-length = 100
+exclude = .git,__pycache__,docs/,build/,dist/,.venv/ 

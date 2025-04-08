@@ -1,0 +1,15 @@
+# Default owners for everything in the repo
+* @scottwilcox
+
+# Testing framework
+/mcp_testing/ @scottwilcox
+
+# Minimal server implementations
+/minimal_mcp_server/ @scottwilcox
+/minimal_http_server/ @scottwilcox
+
+# Protocol specifications
+/specification/ @scottwilcox
+
+# JSON Schema
+/schema/ @scottwilcox 
