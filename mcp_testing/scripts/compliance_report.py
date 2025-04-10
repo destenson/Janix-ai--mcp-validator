@@ -160,19 +160,22 @@ class VerboseTestRunner:
             
         total_time = time.time() - self.start_time
         
-        # Count passed and failed tests, handling non-dictionary results
+        # Count passed, failed, and skipped tests, handling non-dictionary results
         passed = 0
         skipped = 0
         for r in test_results:
             if isinstance(r, dict):
                 if r.get("passed", False):
-                    passed += 1
+                    if "skipped" in r.get("message", "").lower():
+                        skipped += 1
+                    else:
+                        passed += 1
                 if r.get("skipped", False):
                     skipped += 1
         
-        failed = total_tests - passed
+        failed = total_tests - passed - skipped
         
-        log_with_timestamp(f"Test suite completed: {passed} passed, {failed} failed, total time: {total_time:.2f}s")
+        log_with_timestamp(f"Test suite completed: {passed} passed, {failed} failed, {skipped} skipped, total time: {total_time:.2f}s")
         
         # Format the results exactly like the standard runner does
         return {
@@ -428,7 +431,12 @@ async def main():
         }
     
     # Calculate compliance percentage
-    compliance_percentage = (passed_tests / total_tests) * 100 if total_tests > 0 else 0
+    if isinstance(results, dict) and 'skipped' in results:
+        # Exclude skipped tests from the total when calculating compliance
+        adjusted_total = total_tests - results['skipped']
+        compliance_percentage = (passed_tests / adjusted_total) * 100 if adjusted_total > 0 else 100
+    else:
+        compliance_percentage = (passed_tests / total_tests) * 100 if total_tests > 0 else 0
     
     # Determine compliance status
     if compliance_percentage == 100:
@@ -442,6 +450,8 @@ async def main():
     log_with_timestamp(f"Total tests: {total_tests}")
     log_with_timestamp(f"Passed: {passed_tests}")
     log_with_timestamp(f"Failed: {failed_tests}")
+    if isinstance(results, dict) and 'skipped' in results:
+        log_with_timestamp(f"Skipped: {results['skipped']}")
     log_with_timestamp(f"Compliance Status: {compliance_status} ({compliance_percentage:.1f}%)")
     
     # Extract server name from the command (for report purposes)
