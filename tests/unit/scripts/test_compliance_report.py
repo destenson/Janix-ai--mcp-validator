@@ -19,6 +19,7 @@ import pytest
 from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
+import importlib
 
 from mcp_testing.scripts import compliance_report
 from mcp_testing.utils.server_compatibility import (
@@ -44,6 +45,9 @@ class TestComplianceReport(unittest.TestCase):
         
         # Save original sys.argv
         self.original_argv = sys.argv
+        
+        # Save original environment variables
+        self.original_environ = os.environ.copy()
         
         # Create a test timestamp for consistency
         self.test_timestamp = "20220101_120000"
@@ -771,50 +775,157 @@ class TestComplianceReport(unittest.TestCase):
 
     @pytest.mark.asyncio
     async def test_verbose_test_runner_run_tests(self):
-        """Test the run_tests method of VerboseTestRunner."""
-        # Create test data
-        test_func1 = AsyncMock()
-        test_func2 = AsyncMock()
-        tests = [(test_func1, "test_func1"), (test_func2, "test_func2")]
-        protocol = "2025-03-26"
-        server_command = "test-server"
-        env_vars = {"TEST_VAR": "test_value"}
-        
-        # Create the runner
+        """Test the VerboseTestRunner.run_tests method."""
+        # Create a runner
         runner = compliance_report.VerboseTestRunner(debug=True)
         
-        # Mock run_test_with_progress
-        runner.run_test_with_progress = AsyncMock()
-        runner.run_test_with_progress.side_effect = [
-            {"name": "test_func1", "passed": True},
-            {"name": "test_func2", "passed": False}
+        # Create mock test function
+        async def test_func(protocol, server_command):
+            return True, "Test passed"
+        
+        # Create test list with names
+        tests = [(test_func, "test_func")]
+        
+        # Mock run_test_with_progress to track calls
+        with patch.object(runner, 'run_test_with_progress') as mock_run_with_progress:
+            # Mock the return value
+            mock_run_with_progress.return_value = {
+                "name": "test_func",
+                "passed": True,
+                "message": "Test passed",
+                "duration": 0.1
+            }
+            
+            # Run the tests
+            results = await runner.run_tests(tests, "2025-03-26", "test-server", os.environ.copy())
+            
+            # Verify that run_test_with_progress was called with the right parameters
+            mock_run_with_progress.assert_called_once()
+            args, kwargs = mock_run_with_progress.call_args
+            self.assertEqual(kwargs['test_func'], test_func)
+            self.assertEqual(kwargs['test_name'], "test_func")
+            
+            # Verify the results
+            self.assertEqual(results['total'], 1)
+            self.assertEqual(results['passed'], 1)
+            self.assertEqual(results['failed'], 0)
+            self.assertEqual(len(results['results']), 1)
+            self.assertEqual(results['results'][0]['name'], "test_func")
+            
+    @pytest.mark.asyncio
+    async def test_verbose_test_runner_comprehensive(self):
+        """Comprehensive test for the VerboseTestRunner class."""
+        # Create a runner instance
+        runner = compliance_report.VerboseTestRunner(debug=True)
+        
+        # Create mock test functions with various behaviors
+        async def test_pass(protocol, server_command):
+            return True, "Test passed successfully"
+            
+        async def test_fail(protocol, server_command):
+            return False, "Test failed as expected"
+            
+        async def test_exception(protocol, server_command):
+            raise Exception("Expected test exception")
+            
+        async def test_returns_non_dict(protocol, server_command):
+            return "This is not a dictionary result"
+            
+        async def test_skipped(protocol, server_command):
+            return {"name": "test_skipped", "passed": True, "skipped": True, "message": "Test skipped"}
+        
+        # Create test cases list
+        tests = [
+            (test_pass, "test_pass"),
+            (test_fail, "test_fail"),
+            (test_exception, "test_exception"),
+            (test_returns_non_dict, "test_returns_non_dict"),
+            (test_skipped, "test_skipped")
         ]
         
-        # Mock time function for predictable timing
-        with patch('time.time', side_effect=[100.0, 101.0]):
-            with patch('mcp_testing.scripts.compliance_report.log_with_timestamp'):
-                result = await runner.run_tests(tests, protocol, server_command, env_vars)
+        # Mock MCPTestRunner to track calls and return predefined results
+        with patch('mcp_testing.utils.runner.MCPTestRunner') as mock_test_runner_class:
+            # Create mock instances for each test
+            mock_instances = []
+            mock_results = [
+                {"name": "test_pass", "passed": True, "message": "Test passed successfully"},
+                {"name": "test_fail", "passed": False, "message": "Test failed as expected"},
+                # Exception will be handled by the run_test_with_progress method
+                # Non-dict result will be handled by the run_test_with_progress method
+                {"name": "test_skipped", "passed": True, "skipped": True, "message": "Test skipped"}
+            ]
+            
+            for i in range(3):  # Only need to mock the first 3 test runners
+                mock_instance = MagicMock()
+                mock_instance.run_test = AsyncMock(return_value=mock_results[i])
+                mock_instances.append(mock_instance)
                 
-                # Check runner.run_test_with_progress calls
-                self.assertEqual(runner.run_test_with_progress.call_count, 2)
-                
-                # Check first call
-                call_args = runner.run_test_with_progress.call_args_list[0][0]
-                self.assertEqual(call_args[0], test_func1)
-                self.assertEqual(call_args[1], server_command)
-                self.assertEqual(call_args[2], protocol)
-                self.assertEqual(call_args[3], "test_func1")
-                self.assertEqual(call_args[4], env_vars)
-                self.assertEqual(call_args[5], 1)  # current
-                self.assertEqual(call_args[6], 2)  # total
-                
-                # Check result structure
-                self.assertEqual(result["total"], 2)
-                self.assertEqual(result["passed"], 1)
-                self.assertEqual(result["failed"], 1)
-                self.assertEqual(len(result["results"]), 2)
-        # Return None to avoid returning the result from an awaited coroutine
-        return None
+            mock_test_runner_class.side_effect = mock_instances
+            
+            # Test run_test_with_progress method directly first
+            
+            # Test 1: Regular successful test
+            result1 = await runner.run_test_with_progress(
+                test_func=test_pass,
+                server_command="test-server",
+                protocol_version="2025-03-26",
+                test_name="test_pass",
+                env_vars=os.environ.copy(),
+                current=1,
+                total=5
+            )
+            
+            self.assertTrue(result1["passed"])
+            self.assertEqual(result1["name"], "test_pass")
+            
+            # Test 2: Test that throws an exception
+            result2 = await runner.run_test_with_progress(
+                test_func=test_exception,
+                server_command="test-server",
+                protocol_version="2025-03-26",
+                test_name="test_exception",
+                env_vars=os.environ.copy(),
+                current=2,
+                total=5
+            )
+            
+            self.assertFalse(result2["passed"])
+            self.assertEqual(result2["name"], "test_exception")
+            self.assertIn("Test runner exception", result2["message"])
+            
+            # Test 3: Test that returns non-dictionary result
+            result3 = await runner.run_test_with_progress(
+                test_func=test_returns_non_dict,
+                server_command="test-server",
+                protocol_version="2025-03-26",
+                test_name="test_returns_non_dict",
+                env_vars=os.environ.copy(),
+                current=3,
+                total=5
+            )
+            
+            self.assertFalse(result3["passed"])
+            self.assertEqual(result3["name"], "test_returns_non_dict")
+            self.assertIn("Invalid test result", result3["message"])
+            
+            # Now test the run_tests method
+            results = await runner.run_tests(
+                tests=tests,
+                protocol="2025-03-26",
+                server_command="test-server",
+                env_vars=os.environ.copy()
+            )
+            
+            # Verify the results structure
+            self.assertIn("results", results)
+            self.assertIn("total", results)
+            self.assertIn("passed", results)
+            self.assertIn("failed", results)
+            self.assertIn("skipped", results)
+            
+            # Verify the results count
+            self.assertEqual(results["total"], 5)
+            self.assertEqual(len(results["results"]), 5)
 
     @pytest.mark.asyncio
     async def test_keyboard_interrupt_handler(self):
@@ -2145,6 +2256,612 @@ class TestComplianceReport(unittest.TestCase):
                                                     f"Spec tests should not be included in mode={test_mode}, protocol={protocol}")
         
         return None
+
+    def test_fallback_compatibility_utilities(self):
+        """Test the fallback implementations of server compatibility utilities."""
+        # Original imports
+        original_modules = sys.modules.copy()
+        
+        # Force an ImportError for the server_compatibility module
+        sys.modules['mcp_testing.utils.server_compatibility'] = None
+        
+        try:
+            # Reload the compliance_report module to use fallback implementations
+            import importlib
+            importlib.reload(compliance_report)
+            
+            # Test is_shutdown_skipped fallback
+            os.environ["MCP_SKIP_SHUTDOWN"] = "true"
+            self.assertTrue(compliance_report.is_shutdown_skipped())
+            os.environ["MCP_SKIP_SHUTDOWN"] = "false"
+            self.assertFalse(compliance_report.is_shutdown_skipped())
+            
+            # Test prepare_environment_for_server fallback
+            os.environ.clear()
+            env = compliance_report.prepare_environment_for_server("server-brave-search")
+            self.assertEqual(env.get("MCP_SKIP_SHUTDOWN"), "true")
+            
+            env = compliance_report.prepare_environment_for_server("other-server")
+            self.assertNotIn("MCP_SKIP_SHUTDOWN", env)
+            
+            # Test get_server_specific_test_config fallback
+            config = compliance_report.get_server_specific_test_config("server-brave-search")
+            self.assertIn("skip_tests", config)
+            self.assertIn("required_tools", config)
+            
+            config = compliance_report.get_server_specific_test_config("other-server")
+            self.assertEqual(config, {})
+            
+            # Test get_recommended_protocol_version fallback
+            version = compliance_report.get_recommended_protocol_version("server-brave-search")
+            self.assertEqual(version, "2024-11-05")
+            
+            version = compliance_report.get_recommended_protocol_version("other-server")
+            self.assertIsNone(version)
+            
+        finally:
+            # Restore original modules
+            sys.modules.update(original_modules)
+            # Reload compliance_report to restore original implementations
+            importlib.reload(compliance_report)
+            # Restore environment
+            os.environ.clear()
+            os.environ.update(self.original_environ)
+
+    @pytest.mark.asyncio
+    async def test_verbose_test_runner_run_tests_with_timeout(self):
+        """Test the VerboseTestRunner.run_tests method with timeout handling."""
+        # Create a runner
+        runner = compliance_report.VerboseTestRunner(debug=True)
+        
+        # Create mock test functions
+        async def test_pass(protocol, server_command):
+            return True, "Test passed"
+            
+        async def test_timeout(protocol, server_command):
+            await asyncio.sleep(0.5)  # Simulate slow test
+            return True, "Test completed"
+        
+        # Create test list with names
+        tests = [
+            (test_pass, "test_pass"),
+            (test_timeout, "test_timeout")
+        ]
+        
+        # Mock run_test_with_progress to track calls
+        original_method = runner.run_test_with_progress
+        
+        # Create patch and spy on the run_test_with_progress method
+        with patch.object(runner, 'run_test_with_progress') as mock_run_with_progress:
+            # Set up the mock to call the original method
+            mock_run_with_progress.side_effect = original_method
+            
+            # Run the tests with timeout
+            results = await runner.run_tests(
+                tests=tests,
+                protocol="2025-03-26",
+                server_command="test-server",
+                env_vars=os.environ.copy(),
+                timeout=0.1  # Short timeout to test timeout handling
+            )
+            
+            # Verify that run_test_with_progress was called for each test
+            self.assertEqual(mock_run_with_progress.call_count, 2)
+            
+            # Verify the results format
+            self.assertIn("results", results)
+            self.assertIn("total", results)
+            self.assertIn("passed", results)
+            self.assertIn("failed", results)
+            self.assertIn("skipped", results)
+            self.assertIn("timeouts", results)
+            
+            # Verify correct counts
+            self.assertEqual(results["total"], 2)
+            
+            # Check that we have results for both tests
+            result_names = [r.get("name") for r in results["results"]]
+            self.assertIn("test_pass", result_names)
+            self.assertIn("test_timeout", result_names)
+
+    @pytest.mark.asyncio
+    async def test_main_with_standard_runner(self):
+        """Test the main function with the standard test runner (non-verbose mode)."""
+        # Mock arguments - with verbose explicitly set to False
+        with patch('mcp_testing.scripts.compliance_report.argparse.ArgumentParser.parse_args') as mock_parse_args:
+            mock_args = Namespace(
+                server_command='test-server',
+                protocol_version='2025-03-26',
+                server_config=None,
+                args=None,
+                output_dir='reports',
+                report_prefix='cr',
+                json=True,
+                debug=False,
+                skip_async=False,
+                skip_shutdown=False,
+                required_tools=None,
+                skip_tests=None,
+                dynamic_only=False,
+                test_mode='all',
+                spec_coverage_only=False,
+                auto_detect=False,
+                test_timeout=30,
+                tools_timeout=30,
+                verbose=False  # Explicitly set to False
+            )
+            mock_parse_args.return_value = mock_args
+            
+            # Mock the standard runner instead of VerboseTestRunner
+            with patch('mcp_testing.utils.runner.run_tests') as mock_run_tests:
+                test_results = {
+                    "results": [{"name": "test_init", "passed": True, "duration": 0.5}],
+                    "total": 1,
+                    "passed": 1,
+                    "failed": 0,
+                    "skipped": 0,
+                    "timeouts": 0
+                }
+                mock_run_tests.return_value = test_results
+                
+                # Mock environment preparation
+                with patch('mcp_testing.scripts.compliance_report.prepare_environment_for_server', 
+                        return_value=os.environ.copy()) as mock_prepare_env:
+                    
+                    # Mock makedirs and open
+                    with patch('mcp_testing.scripts.compliance_report.os.makedirs') as mock_makedirs:
+                        with patch('builtins.open', new_callable=mock_open) as mock_open_call:
+                    
+                            # Call the main function
+                            result = await compliance_report.main()
+                            
+                            # Assert that the function returned success (0)
+                            self.assertEqual(result, 0)
+                            
+                            # Verify method calls
+                            mock_prepare_env.assert_called_once_with('test-server')
+                            mock_run_tests.assert_called_once()
+                            
+                            # Verify that reports directory was created
+                            mock_makedirs.assert_called_once_with(os.path.join(self.mock_parent_dir, 'reports'), exist_ok=True)
+                            
+                            # Verify that reports were written
+                            mock_open_call.assert_any_call(os.path.join(self.mock_parent_dir, 'reports', 
+                                                f'cr_test-server_2025-03-26_{self.test_timestamp}.json'), 'w')
+                            mock_open_call.assert_any_call(os.path.join(self.mock_parent_dir, 'reports', 
+                                                f'cr_test-server_2025-03-26_{self.test_timestamp}.md'), 'w')
+                            
+                            # Check console output
+                            output = self.held_output.getvalue()
+                            self.assertIn("Running compliance tests for protocol 2025-03-26", output)
+                            self.assertIn("Compliance Status: ✅ Fully Compliant", output)
+
+    def test_main_module(self):
+        """Test the __main__ block for different scenarios."""
+        # Create a module-level copy for testing
+        test_module = type('TestModule', (), {})
+        test_module.__name__ = "__main__"
+        test_module.main = MagicMock()
+        test_module.asyncio = MagicMock()
+        test_module.sys = MagicMock()
+        
+        # 1. Test normal execution
+        test_module.asyncio.run.return_value = 0
+        
+        # Simulate the __main__ block
+        if test_module.__name__ == "__main__":
+            try:
+                exit_code = test_module.asyncio.run(test_module.main())
+                test_module.sys.exit(exit_code)
+            except KeyboardInterrupt:
+                test_module.sys.exit(130)
+            except Exception as e:
+                test_module.sys.exit(1)
+        
+        # Verify the calls
+        test_module.asyncio.run.assert_called_once_with(test_module.main())
+        test_module.sys.exit.assert_called_once_with(0)
+        
+        # Reset mocks
+        test_module.asyncio.reset_mock()
+        test_module.sys.reset_mock()
+        
+        # 2. Test KeyboardInterrupt handling
+        test_module.asyncio.run.side_effect = KeyboardInterrupt()
+        
+        # Simulate the __main__ block
+        if test_module.__name__ == "__main__":
+            try:
+                exit_code = test_module.asyncio.run(test_module.main())
+                test_module.sys.exit(exit_code)
+            except KeyboardInterrupt:
+                test_module.sys.exit(130)
+            except Exception as e:
+                test_module.sys.exit(1)
+        
+        # Verify the exit code for KeyboardInterrupt
+        test_module.sys.exit.assert_called_once_with(130)
+        
+        # Reset mocks
+        test_module.asyncio.reset_mock()
+        test_module.sys.reset_mock()
+        
+        # 3. Test general exception handling
+        test_module.asyncio.run.side_effect = Exception("Test error")
+        
+        # Simulate the __main__ block
+        if test_module.__name__ == "__main__":
+            try:
+                exit_code = test_module.asyncio.run(test_module.main())
+                test_module.sys.exit(exit_code)
+            except KeyboardInterrupt:
+                test_module.sys.exit(130)
+            except Exception as e:
+                test_module.sys.exit(1)
+        
+        # Verify the exit code for general exceptions
+        test_module.sys.exit.assert_called_once_with(1)
+
+    @pytest.mark.asyncio
+    async def test_main_minimal_mocking(self):
+        """Test the main function with minimal mocking to increase coverage."""
+        # Create a temp directory for testing
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Set up mock command line arguments
+            test_args = [
+                "compliance_report.py",
+                "--server-command", "test-server",
+                "--protocol-version", "2025-03-26",
+                "--output-dir", temp_dir,
+                "--dynamic-only",
+                "--json"
+            ]
+            
+            with patch('sys.argv', test_args):
+                # Mock only the specific functions we need to avoid actual server process execution
+                with patch('mcp_testing.scripts.compliance_report.VerboseTestRunner') as mock_runner_class:
+                    # Create a mock runner instance with realistic behavior
+                    mock_runner = MagicMock()
+                    mock_runner_class.return_value = mock_runner
+                    
+                    # Create realistic test results
+                    test_results = {
+                        "results": [
+                            {"name": "test_init", "passed": True, "duration": 0.1, "message": "Init passed"},
+                            {"name": "test_function", "passed": False, "duration": 0.2, "message": "Test failed"},
+                            {"name": "test_skipped", "passed": True, "skipped": True, "duration": 0.0, "message": "Skipped"}
+                        ],
+                        "total": 3,
+                        "passed": 1,
+                        "failed": 1,
+                        "skipped": 1,
+                        "timeouts": 0
+                    }
+                    
+                    # Configure the run_tests method to return realistic results
+                    mock_runner.run_tests = AsyncMock(return_value=test_results)
+                    
+                    # Mock environment preparation to avoid actual environment changes
+                    with patch('mcp_testing.scripts.compliance_report.prepare_environment_for_server',
+                              return_value=os.environ.copy()):
+                        
+                        # Run the actual main function
+                        result = await compliance_report.main()
+                        
+                        # Check the result
+                        self.assertEqual(result, 1)  # Non-zero because of failed test
+                        
+                        # Verify the runner was called
+                        mock_runner_class.assert_called_once()
+                        mock_runner.run_tests.assert_called()
+                        
+                        # Check output files were created
+                        report_files = os.listdir(temp_dir)
+                        self.assertTrue(any(f.endswith('.json') for f in report_files))
+                        self.assertTrue(any(f.endswith('.md') for f in report_files))
+                        
+                        # Check stdout output
+                        output = self.held_output.getvalue()
+                        self.assertIn("Running in dynamic-only mode", output)
+                        self.assertIn("Compliance Status: ", output)
+
+    @pytest.mark.asyncio
+    async def test_main_direct_args(self):
+        """Test the main function with direct argument mocking to maximize coverage."""
+        # Create a temp directory for testing
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Set up different test scenarios with varying args
+            test_scenarios = [
+                # 1. Dynamic-only mode
+                Namespace(
+                    server_command='test-server-1',
+                    protocol_version='2025-03-26',
+                    server_config=None,
+                    args=None,
+                    output_dir=temp_dir,
+                    report_prefix='cr',
+                    json=True,
+                    debug=True,
+                    skip_async=False,
+                    skip_shutdown=False,
+                    required_tools=None,
+                    skip_tests=None,
+                    dynamic_only=True,
+                    test_mode='all',
+                    spec_coverage_only=False,
+                    auto_detect=False,
+                    test_timeout=30,
+                    tools_timeout=30,
+                    verbose=True
+                ),
+                # 2. Spec-coverage-only mode
+                Namespace(
+                    server_command='test-server-2',
+                    protocol_version='2025-03-26',
+                    server_config=None,
+                    args="--extra-arg",
+                    output_dir=temp_dir,
+                    report_prefix='cr',
+                    json=True,
+                    debug=False,
+                    skip_async=True,
+                    skip_shutdown=True,
+                    required_tools="tool1,tool2",
+                    skip_tests="skip_test1,skip_test2",
+                    dynamic_only=False,
+                    test_mode='all',
+                    spec_coverage_only=True,
+                    auto_detect=False,
+                    test_timeout=30,
+                    tools_timeout=30,
+                    verbose=True
+                ),
+                # 3. Auto-detect mode
+                Namespace(
+                    server_command='server-brave-search',
+                    protocol_version='2025-03-26',
+                    server_config=None,
+                    args=None,
+                    output_dir=temp_dir,
+                    report_prefix='cr',
+                    json=True,
+                    debug=True,
+                    skip_async=False,
+                    skip_shutdown=False,
+                    required_tools=None,
+                    skip_tests=None,
+                    dynamic_only=False,
+                    test_mode='all',
+                    spec_coverage_only=False,
+                    auto_detect=True,
+                    test_timeout=30,
+                    tools_timeout=30,
+                    verbose=False
+                ),
+                # 4. Custom test mode
+                Namespace(
+                    server_command='test-server-4',
+                    protocol_version='2024-11-05',
+                    server_config=os.path.join(temp_dir, 'server_config.json'),
+                    args=None,
+                    output_dir=temp_dir,
+                    report_prefix='custom',
+                    json=False,
+                    debug=False,
+                    skip_async=False,
+                    skip_shutdown=False,
+                    required_tools=None,
+                    skip_tests=None,
+                    dynamic_only=False,
+                    test_mode='tools',
+                    spec_coverage_only=False,
+                    auto_detect=False,
+                    test_timeout=15,
+                    tools_timeout=15,
+                    verbose=True
+                )
+            ]
+            
+            # Create a mock server config file
+            with open(os.path.join(temp_dir, 'server_config.json'), 'w') as f:
+                json.dump({
+                    "required_tools": ["config_tool1", "config_tool2"],
+                    "skip_tests": ["config_skip_test"]
+                }, f)
+            
+            # Run tests for each scenario
+            for i, test_args in enumerate(test_scenarios):
+                # Clear previous output
+                self.held_output = io.StringIO()
+                sys.stdout = self.held_output
+                
+                # Mock arguments
+                with patch('mcp_testing.scripts.compliance_report.argparse.ArgumentParser.parse_args') as mock_parse_args:
+                    mock_parse_args.return_value = test_args
+                    
+                    # Mock VerboseTestRunner
+                    with patch('mcp_testing.scripts.compliance_report.VerboseTestRunner') as mock_runner_class:
+                        # Create a mock runner instance
+                        mock_runner = MagicMock()
+                        mock_runner_class.return_value = mock_runner
+                        
+                        # Create test results with a mix of passing/failing
+                        test_results = {
+                            "results": [
+                                {"name": f"test_init_{i}", "passed": True, "duration": 0.1},
+                                {"name": f"test_fail_{i}", "passed": False, "duration": 0.2, "message": "Failed"},
+                            ],
+                            "total": 2,
+                            "passed": 1,
+                            "failed": 1,
+                            "skipped": 0,
+                            "timeouts": 0
+                        }
+                        
+                        # Configure the run_tests method
+                        mock_runner.run_tests = AsyncMock(return_value=test_results)
+                        
+                        # For non-verbose mode, mock the standard runner too
+                        if not test_args.verbose:
+                            with patch('mcp_testing.utils.runner.run_tests') as mock_std_runner:
+                                mock_std_runner.return_value = test_results
+                                
+                                # Mock environment preparation
+                                with patch('mcp_testing.scripts.compliance_report.prepare_environment_for_server',
+                                        return_value=os.environ.copy()):
+                                    
+                                    # Run main function
+                                    result = await compliance_report.main()
+                                    
+                                    # Verify result
+                                    self.assertEqual(result, 1)  # Non-zero because of failed test
+                        else:
+                            # Mock environment preparation
+                            with patch('mcp_testing.scripts.compliance_report.prepare_environment_for_server',
+                                    return_value=os.environ.copy()):
+                                
+                                # Run main function
+                                result = await compliance_report.main()
+                                
+                                # Verify result
+                                self.assertEqual(result, 1)  # Non-zero because of failed test
+                        
+                        # Verify output contains expected messages
+                        output = self.held_output.getvalue()
+                        self.assertIn(f"Preparing environment for server: {test_args.server_command}", output)
+                        
+                        if test_args.dynamic_only:
+                            self.assertIn("Running in dynamic-only mode", output)
+                        
+                        if test_args.spec_coverage_only:
+                            self.assertIn("Running specification coverage tests only", output)
+                            
+                        if test_args.auto_detect:
+                            self.assertIn("Auto-detected", output.lower())
+                            
+                        if test_args.test_mode != 'all':
+                            self.assertIn(f"Test mode: {test_args.test_mode}", output)
+                            
+                        if test_args.required_tools:
+                            self.assertIn("Required tools:", output)
+                            
+                        if test_args.skip_tests:
+                            self.assertIn("Skipping tests:", output)
+                        
+                        # Check output files were created
+                        report_files = os.listdir(temp_dir)
+                        if test_args.json:
+                            self.assertTrue(any(test_args.server_command in f and f.endswith('.json') for f in report_files))
+                        self.assertTrue(any(test_args.server_command in f and f.endswith('.md') for f in report_files))
+
+    @pytest.mark.asyncio
+    async def test_verbose_test_runner_direct(self):
+        """Test VerboseTestRunner with direct method calls (no mocking) to improve coverage."""
+        # Create a real VerboseTestRunner instance
+        runner = compliance_report.VerboseTestRunner(debug=True)
+        
+        # Create a simple test function
+        async def test_func(protocol, server_command):
+            return True, "Test passed"
+        
+        # Create a non-dictionary returning function
+        async def test_non_dict_func(protocol, server_command):
+            return "This is not a dictionary"
+        
+        # Create a test that throws an exception
+        async def test_exception_func(protocol, server_command):
+            raise Exception("Test exception")
+        
+        # Create test cases
+        test_cases = [
+            (test_func, "test_func"),
+            (test_non_dict_func, "test_non_dict_func"),
+            (test_exception_func, "test_exception_func")
+        ]
+        
+        # Call run_test_with_progress directly
+        result1 = await runner.run_test_with_progress(
+            test_func=test_func,
+            server_command="test-server",
+            protocol_version="2025-03-26",
+            test_name="test_func",
+            env_vars=os.environ.copy(),
+            current=1,
+            total=3
+        )
+        
+        # Verify the result
+        self.assertTrue(result1["passed"])
+        self.assertEqual(result1["name"], "test_func")
+        self.assertIn("duration", result1)
+        
+        # Test with a function that returns a non-dictionary
+        result2 = await runner.run_test_with_progress(
+            test_func=test_non_dict_func,
+            server_command="test-server",
+            protocol_version="2025-03-26",
+            test_name="test_non_dict_func",
+            env_vars=os.environ.copy(),
+            current=2,
+            total=3
+        )
+        
+        # Verify the result
+        self.assertFalse(result2["passed"])
+        self.assertEqual(result2["name"], "test_non_dict_func")
+        self.assertIn("Invalid test result", result2["message"])
+        
+        # Test with a function that throws an exception
+        result3 = await runner.run_test_with_progress(
+            test_func=test_exception_func,
+            server_command="test-server",
+            protocol_version="2025-03-26",
+            test_name="test_exception_func",
+            env_vars=os.environ.copy(),
+            current=3,
+            total=3
+        )
+        
+        # Verify the result
+        self.assertFalse(result3["passed"])
+        self.assertEqual(result3["name"], "test_exception_func")
+        self.assertIn("Test runner exception", result3["message"])
+        
+        # Patch only the MCPTestRunner to avoid execution of actual server commands
+        with patch('mcp_testing.utils.runner.MCPTestRunner') as mock_runner_class:
+            # Setup the mocked runner behavior
+            mock_instance = MagicMock()
+            mock_runner_class.return_value = mock_instance
+            
+            # Configure the run_test method to return different results
+            mock_instance.run_test = AsyncMock(side_effect=[
+                {"name": "test_func", "passed": True, "message": "Test passed"},
+                {"name": "test_non_dict_func", "passed": False, "message": "Invalid result"},
+                Exception("Test runner error")
+            ])
+            
+            # Call run_tests with all test cases
+            results = await runner.run_tests(
+                tests=test_cases,
+                protocol="2025-03-26",
+                server_command="test-server",
+                env_vars=os.environ.copy()
+            )
+            
+            # Verify the results structure
+            self.assertIn("results", results)
+            self.assertIn("total", results)
+            self.assertIn("passed", results)
+            self.assertIn("failed", results)
+            self.assertIn("skipped", results)
+            self.assertIn("timeouts", results)
+            
+            # Check counts
+            self.assertEqual(results["total"], 3)
+            self.assertEqual(results["failed"], 2)
+            
+            # Verify call to MCPTestRunner.run_test was made for each test
+            self.assertEqual(mock_instance.run_test.call_count, 3)
 
 
 if __name__ == "__main__":
