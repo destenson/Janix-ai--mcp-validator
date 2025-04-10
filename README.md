@@ -2,6 +2,10 @@
 
 A testing suite and reference implementation for the [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol).
 
+## Summary
+
+The MCP Protocol Validator provides a comprehensive environment for testing and validating MCP server implementations. With reference implementations for both STDIO and HTTP transports, along with an extensive testing framework, it ensures developers can verify their servers comply with the MCP specification. The modular architecture supports various server configurations, transport methods, and provides detailed compliance reporting, making it an essential tool for MCP server development and validation.
+
 ## Overview
 
 This repository contains:
@@ -13,28 +17,6 @@ This repository contains:
 The current implementation is fully compliant with the latest MCP protocol specification (2025-03-26).
 
 ✅ All tests pass for the reference implementations!
-
-## Repository Organization
-
-```
-.
-├── mcp_testing/                # Testing framework
-│   ├── bin/                    # Executable scripts
-│   ├── http/                   # HTTP testing module
-│   ├── protocols/              # Protocol version tests
-│   ├── scripts/                # Command-line tools
-│   ├── server_configs/         # Server-specific configuration files
-│   ├── stdio/                  # STDIO testing module
-│   ├── transports/             # Transport layer implementations
-│   └── utils/                  # Shared utilities
-├── minimal_http_server/        # HTTP server reference implementation
-├── minimal_mcp_server/         # STDIO server reference implementation
-├── reports/                    # Generated test reports
-├── schema/                     # JSON Schema definitions
-└── specification/              # Protocol specifications
-```
-
-Each directory contains its own README with specific documentation.
 
 ---
 
@@ -284,9 +266,7 @@ pytest mcp_testing/tests/base_protocol/
 
 ---
 
-## Summary
 
-The MCP Protocol Validator provides a comprehensive environment for testing and validating MCP server implementations. With reference implementations for both STDIO and HTTP transports, along with an extensive testing framework, it ensures developers can verify their servers comply with the MCP specification. The modular architecture supports various server configurations, transport methods, and provides detailed compliance reporting, making it an essential tool for MCP server development and validation.
 
 ## License
 

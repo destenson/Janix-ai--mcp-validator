@@ -1,4 +1,4 @@
-# MCP Protocol Validator v0.0.1
+# MCP Protocol Validator v0.1.0
 
 ## Initial Release
 
