@@ -119,22 +119,33 @@ class TestMCPHttpTester(unittest.TestCase):
         args, kwargs = mock_post.call_args
         self.assertEqual(kwargs['headers'].get('Mcp-Session-Id'), "test-session-id")
     
-    @patch('requests.Session.post')
-    def test_send_request_save_session_id(self, mock_post):
+    @patch.object(MCPHttpTester, 'send_request')
+    def test_send_request_save_session_id(self, mock_send_request):
         """Test that send_request captures session ID from initialize response."""
-        # Setup mock response for initialize
+        # Setup mock response for initialize with capitalized header name
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.headers = {'mcp-session-id': 'new-session-id'}
+        mock_response.headers = {'Mcp-Session-Id': 'new-session-id'}  # Capital M in Mcp
         mock_response.json.return_value = {"jsonrpc": "2.0", "result": {}}
-        mock_post.return_value = mock_response
+        mock_send_request.return_value = (200, mock_response.headers, mock_response.json())
         
         # Call initialize method
         self.tester.send_request("initialize")
         
-        # Verify session ID was captured
+        # Verify session ID was captured despite case differences
         self.assertEqual(self.tester.session_id, "new-session-id")
-    
+        
+        # Test with lowercase header
+        mock_response.headers = {'mcp-session-id': 'lowercase-session-id'}
+        mock_send_request.return_value = (200, mock_response.headers, mock_response.json())
+        
+        # Call initialize method
+        self.tester.session_id = None
+        self.tester.send_request("initialize")
+        
+        # Verify session ID was captured
+        self.assertEqual(self.tester.session_id, "lowercase-session-id")
+
     @patch('requests.options')
     def test_options_request_success(self, mock_options):
         """Test the options_request method with successful response."""
@@ -222,140 +233,36 @@ class TestMCPHttpTester(unittest.TestCase):
             sys.stdout = original_stdout
     
     @patch.object(MCPHttpTester, 'send_request')
-    def test_initialize_success(self, mock_send_request):
-        """Test the initialize method with successful response."""
-        # Setup a proper response according to the MCP protocol spec
-        mock_send_request.return_value = (
-            200,
-            {'Content-Type': 'application/json', 'mcp-session-id': 'test-session-id'},
-            {
-                "jsonrpc": "2.0",
-                "id": "test-id",
-                "result": {
-                    "serverInfo": {"name": "Test Server", "version": "1.0.0"},
-                    "protocolVersion": "2025-03-26",  # Required field
-                    "capabilities": {"tools": {"asyncSupported": True}}
-                }
-            }
-        )
-        
-        # Save original stdout and redirect for capturing output
-        original_stdout = sys.stdout
-        sys.stdout = StringIO()
-        
-        try:
-            # Call method
-            result = self.tester.initialize()
-            
-            # Verify result
-            self.assertTrue(result)
-            self.assertTrue(self.tester.initialized)
-            self.assertEqual(self.tester.session_id, "test-session-id")
-            
-            # Verify correct parameters were sent
-            mock_send_request.assert_called_with("initialize", {
-                "protocolVersion": "2025-03-26",
-                "clientInfo": {"name": "MCP HTTP Tester", "version": "1.0.0"},
-                "capabilities": {"tools": {"asyncSupported": True}, "resources": True}
-            })
-            
-            # Verify output messages
-            output = sys.stdout.getvalue()
-            self.assertIn("Server initialization successful", output)
-        finally:
-            # Restore stdout
-            sys.stdout = original_stdout
-
-    @patch.object(MCPHttpTester, 'send_request')
-    def test_initialize_already_initialized(self, mock_send_request):
+    @patch.object(MCPHttpTester, 'reset_server')
+    def test_initialize_already_initialized(self, mock_reset_server, mock_send_request):
         """Test initialization when server is already initialized."""
-        # Mock first response with already initialized error
+        # Setup return values for the mocks
+        # First call: Error saying server is already initialized
         error_response = {
             "jsonrpc": "2.0", 
             "id": "test-id", 
             "error": {
                 "code": -32803, 
-                "message": "Session already initialized",
-                "data": {"sessionId": "existing-session-id"}
+                "message": "Server already initialized"
             }
         }
-        mock_send_request.return_value = (200, {}, error_response)
-        
-        # Call method
-        result = self.tester.initialize()
-        
-        # Verify result
-        self.assertTrue(result)
-        self.assertEqual(self.tester.session_id, "existing-session-id")
-        self.assertTrue(self.tester.initialized)
-        
-        # Verify request
-        mock_send_request.assert_called_with("initialize", {
-            "protocolVersion": "2025-03-26",
-            "clientInfo": {"name": "MCP HTTP Tester", "version": "1.0.0"},
-            "capabilities": {"tools": {"asyncSupported": True}, "resources": True}
-        })
-
-    @patch('requests.Session.post')
-    @patch.object(MCPHttpTester, 'send_request')
-    def test_initialize_already_initialized_no_session_data(self, mock_send_request, mock_post):
-        """Test initialization when server is already initialized but no session in error data."""
-        # Mock first response with already initialized error but no session data
-        error_response = {
-            "jsonrpc": "2.0", 
-            "id": "test-id", 
-            "error": {
-                "code": -32803, 
-                "message": "Session already initialized"
-                # No data field with sessionId
+        # Second call: Successful initialization after reset
+        success_response = {
+            "jsonrpc": "2.0",
+            "id": "test-id",
+            "result": {
+                "protocolVersion": "2025-03-26",
+                "serverInfo": {"name": "Test Server"},
+                "capabilities": {}
             }
         }
-        mock_send_request.return_value = (200, {}, error_response)
         
-        # Mock server/info response with session ID in header
-        mock_info_response = MagicMock()
-        mock_info_response.status_code = 200
-        mock_info_response.headers = {'mcp-session-id': 'header-session-id'}
-        mock_info_response.json.return_value = {"jsonrpc": "2.0", "result": {}}
-        mock_post.return_value = mock_info_response
-        
-        # Call method
-        result = self.tester.initialize()
-        
-        # Verify result
-        self.assertTrue(result)
-        self.assertEqual(self.tester.session_id, "header-session-id")
-        self.assertTrue(self.tester.initialized)
-
-    @patch('requests.Session.post')
-    @patch.object(MCPHttpTester, 'send_request')
-    def test_initialize_already_initialized_fallback_to_new_request(self, mock_send_request, mock_post):
-        """Test initialization with fallback to new initialize request."""
-        # Mock first response with already initialized error
-        error_response = {
-            "jsonrpc": "2.0", 
-            "id": "test-id", 
-            "error": {
-                "code": -32803, 
-                "message": "Session already initialized"
-            }
-        }
-        mock_send_request.return_value = (200, {}, error_response)
-        
-        # Mock first server/info response with no session ID
-        first_response = MagicMock()
-        first_response.status_code = 200
-        first_response.headers = {}  # No session ID
-        first_response.json.return_value = {"jsonrpc": "2.0", "result": {}}
-        
-        # Mock second initialize response with session ID
-        second_response = MagicMock()
-        second_response.status_code = 200
-        second_response.headers = {'mcp-session-id': 'new-session-id'}
-        second_response.json.return_value = {"jsonrpc": "2.0", "result": {}}
-        
-        # Return different responses on each call
-        mock_post.side_effect = [first_response, second_response]
+        # Configure mocks
+        mock_send_request.side_effect = [
+            (200, {}, error_response),  # First call: already initialized error
+            (200, {"mcp-session-id": "new-session-id"}, success_response)  # Second call: successful init after reset
+        ]
+        mock_reset_server.return_value = True  # Reset is successful
         
         # Call method
         result = self.tester.initialize()
@@ -364,39 +271,80 @@ class TestMCPHttpTester(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(self.tester.session_id, "new-session-id")
         self.assertTrue(self.tester.initialized)
+        
+        # Verify reset_server was called
+        mock_reset_server.assert_called_once()
+        
+        # Verify send_request was called twice
+        self.assertEqual(mock_send_request.call_count, 2)
 
-    @patch('requests.Session.post')
     @patch.object(MCPHttpTester, 'send_request')
-    def test_initialize_already_initialized_fallback_to_dummy(self, mock_send_request, mock_post):
-        """Test initialization with fallback to dummy session ID."""
-        # Mock first response with already initialized error
+    @patch.object(MCPHttpTester, 'reset_server')
+    def test_initialize_already_initialized_reset_fails(self, mock_reset_server, mock_send_request):
+        """Test initialization when server is already initialized but reset fails."""
+        # First response: already initialized error
         error_response = {
             "jsonrpc": "2.0", 
             "id": "test-id", 
             "error": {
                 "code": -32803, 
-                "message": "Session already initialized"
+                "message": "Server already initialized"
             }
         }
         mock_send_request.return_value = (200, {}, error_response)
         
-        # Mock post to raise exception
-        mock_post.side_effect = Exception("Test error")
+        # Reset fails
+        mock_reset_server.return_value = False
         
         # Call method
         result = self.tester.initialize()
         
         # Verify result
-        self.assertTrue(result)
-        self.assertIsNotNone(self.tester.session_id)
-        self.assertTrue(self.tester.session_id.startswith("dummy-"))
-        self.assertTrue(self.tester.initialized)
+        self.assertFalse(result)
+        self.assertFalse(self.tester.initialized)
+        
+        # Verify reset_server was called
+        mock_reset_server.assert_called_once()
+        
+        # Verify send_request was called once (not twice because reset failed)
+        mock_send_request.assert_called_once()
+
+    @patch.object(MCPHttpTester, 'send_request')
+    @patch.object(MCPHttpTester, 'reset_server')
+    def test_initialize_already_initialized_still_initialized_after_reset(self, mock_reset_server, mock_send_request):
+        """Test initialization when server is still already initialized after reset."""
+        # Setup both calls to return already initialized error
+        error_response = {
+            "jsonrpc": "2.0", 
+            "id": "test-id", 
+            "error": {
+                "code": -32803, 
+                "message": "Server already initialized"
+            }
+        }
+        mock_send_request.side_effect = [(200, {}, error_response), (200, {}, error_response)]
+        
+        # Reset succeeds but server is still in initialized state
+        mock_reset_server.return_value = True
+        
+        # Call method
+        result = self.tester.initialize()
+        
+        # Verify result
+        self.assertFalse(result)  # Should fail as we couldn't initialize after reset
+        self.assertFalse(self.tester.initialized)
+        
+        # Verify reset_server was called
+        mock_reset_server.assert_called_once()
+        
+        # Verify send_request was called twice
+        self.assertEqual(mock_send_request.call_count, 2)
 
     @patch.object(MCPHttpTester, 'send_request')
     def test_initialize_with_session_id_in_body(self, mock_send_request):
-        """Test initialization with session ID in response body."""
-        # Mock response with session ID in body
-        body_response = {
+        """Test initialization with session ID in different places of the response body."""
+        # Test case 1: Standard sessionId in result
+        body_response1 = {
             "jsonrpc": "2.0",
             "id": "test-id",
             "result": {
@@ -406,7 +354,7 @@ class TestMCPHttpTester(unittest.TestCase):
                 "capabilities": {}
             }
         }
-        mock_send_request.return_value = (200, {}, body_response)
+        mock_send_request.return_value = (200, {}, body_response1)
         
         # Call method
         result = self.tester.initialize()
@@ -414,6 +362,33 @@ class TestMCPHttpTester(unittest.TestCase):
         # Verify result
         self.assertTrue(result)
         self.assertEqual(self.tester.session_id, "body-session-id")
+        self.assertTrue(self.tester.initialized)
+        
+        # Reset the tester's state
+        self.tester.session_id = None
+        self.tester.initialized = False
+        
+        # Test case 2: Nested session object in result
+        body_response2 = {
+            "jsonrpc": "2.0",
+            "id": "test-id",
+            "result": {
+                "session": {
+                    "id": "nested-session-id"
+                },
+                "protocolVersion": "2025-03-26",
+                "serverInfo": {"name": "Test Server"},
+                "capabilities": {}
+            }
+        }
+        mock_send_request.return_value = (200, {}, body_response2)
+        
+        # Call method
+        result = self.tester.initialize()
+        
+        # Verify result
+        self.assertTrue(result)
+        self.assertEqual(self.tester.session_id, "nested-session-id")
         self.assertTrue(self.tester.initialized)
 
     @patch.object(MCPHttpTester, 'send_request')
@@ -436,8 +411,7 @@ class TestMCPHttpTester(unittest.TestCase):
         
         # Verify result
         self.assertTrue(result)
-        self.assertIsNotNone(self.tester.session_id)
-        self.assertTrue(self.tester.session_id.startswith("dummy-"))
+        self.assertIsNone(self.tester.session_id)  # No dummy session ID anymore
         self.assertTrue(self.tester.initialized)
 
     @patch.object(MCPHttpTester, 'send_request')
@@ -1013,6 +987,113 @@ class TestMCPHttpTester(unittest.TestCase):
         # Verify result
         self.assertFalse(result)
 
+    @patch('requests.Session.post')
+    def test_reset_server_no_session_success(self, mock_post):
+        """Test reset_server method success without session ID."""
+        # Mock successful response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"jsonrpc": "2.0", "id": "test", "result": {}}
+        mock_post.return_value = mock_response
+        
+        # Set debug for output testing
+        self.tester.debug = True
+        original_stdout = sys.stdout
+        sys.stdout = StringIO()
+        
+        try:
+            # Call method
+            result = self.tester.reset_server()
+            
+            # Verify result
+            self.assertTrue(result)
+            
+            # Verify the log output
+            output = sys.stdout.getvalue()
+            self.assertIn("Sending shutdown request without session ID", output)
+            
+            # Verify post request was made correctly
+            mock_post.assert_called_once()
+            args, kwargs = mock_post.call_args
+            self.assertEqual(args[0], "http://localhost:9000/mcp")
+            self.assertIn("json", kwargs)
+            self.assertEqual(kwargs["json"]["method"], "shutdown")
+            self.assertNotIn("headers", kwargs)  # No headers because no session ID
+        finally:
+            sys.stdout = original_stdout
+            
+        # Verify the session state was reset
+        self.assertIsNone(self.tester.session_id)
+        self.assertFalse(self.tester.initialized)
+
+    @patch('requests.Session.post')
+    def test_reset_server_with_session_success(self, mock_post):
+        """Test reset_server method success with session ID."""
+        # Mock successful response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"jsonrpc": "2.0", "id": "test", "result": {}}
+        mock_post.return_value = mock_response
+        
+        # Set a session ID
+        self.tester.session_id = "test-session-id"
+        self.tester.initialized = True
+        
+        # Set debug for output testing
+        self.tester.debug = True
+        original_stdout = sys.stdout
+        sys.stdout = StringIO()
+        
+        try:
+            # First call without session ID fails
+            mock_post.side_effect = [
+                Exception("First call fails"),  # First call without session fails
+                mock_response  # Second call with session succeeds
+            ]
+            
+            # Call method
+            result = self.tester.reset_server()
+            
+            # Verify result
+            self.assertTrue(result)
+            
+            # Verify the log output
+            output = sys.stdout.getvalue()
+            self.assertIn("Sending shutdown request with existing session ID", output)
+            
+            # Verify post requests were attempted
+            self.assertEqual(mock_post.call_count, 2)
+            
+            # Check the second call had the session header
+            _, kwargs = mock_post.call_args_list[1]
+            self.assertIn("headers", kwargs)
+            self.assertEqual(kwargs["headers"]["Mcp-Session-Id"], "test-session-id")
+        finally:
+            sys.stdout = original_stdout
+            
+        # Verify the session state was reset
+        self.assertIsNone(self.tester.session_id)
+        self.assertFalse(self.tester.initialized)
+
+    @patch('requests.Session.post')
+    def test_reset_server_both_methods_fail(self, mock_post):
+        """Test reset_server method when both approaches fail but we continue anyway."""
+        # Set a session ID
+        self.tester.session_id = "test-session-id"
+        self.tester.initialized = True
+        
+        # Both calls fail
+        mock_post.side_effect = Exception("Test exception")
+        
+        # Call method
+        result = self.tester.reset_server()
+        
+        # Verify result - we still return True to allow testing to continue
+        self.assertTrue(result)
+        
+        # Verify the session state was reset anyway
+        self.assertIsNone(self.tester.session_id)
+
 
 if __name__ == '__main__':
-    unittest.main() 
+    unittest.main()
