@@ -6,7 +6,7 @@ We currently provide security updates for the following versions of the MCP Prot
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
+| 0.1.0   | :white_check_mark: |
 
 ## Reporting a Vulnerability
 
