@@ -1,0 +1,27 @@
+name: Set Repository Topics
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/TOPICS'
+
+jobs:
+  set-topics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Read topics file
+        id: topics
+        run: |
+          TOPICS=$(cat .github/TOPICS | tr '\n' ',')
+          echo "list=${TOPICS%,}" >> $GITHUB_OUTPUT
+
+      - name: Set repository topics
+        uses: genneko/github-repo-topics-action@v1
+        with:
+          topics: ${{ steps.topics.outputs.list }}
+          github_token: ${{ secrets.GITHUB_TOKEN }} 

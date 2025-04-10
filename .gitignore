@@ -9,6 +9,7 @@ SERVER_COMPATIBILITY.md
 mcp_testing/server_configs/*
 opensource_plan.md
 htmlcov
+.coverage
 
 # Virtual environment
 .venv/
