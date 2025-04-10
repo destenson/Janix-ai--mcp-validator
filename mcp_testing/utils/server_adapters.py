@@ -212,6 +212,10 @@ class PostgresServerAdapter(ServerAdapter):
             config["use_shell"] = True
             
         return config
+    
+    def should_skip_shutdown(self) -> bool:
+        """Skip shutdown for PostgreSQL server."""
+        return True
 
 
 class MinimalServerAdapter(ServerAdapter):

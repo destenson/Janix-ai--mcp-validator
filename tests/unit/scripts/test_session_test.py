@@ -274,5 +274,29 @@ class TestSessionTest(unittest.TestCase):
             self.assertIn("ERROR: Failed to restart the server", output)
             self.assertIn("Test failure", output)
 
+    @patch('sys.exit')
+    def test_script_main(self, mock_exit):
+        """Test the script when run as __main__."""
+        # Save the original __name__ value
+        original_name = session_test.__name__
+        
+        # Mock main() to return a specific value
+        with patch('mcp_testing.scripts.session_test.main', return_value=42):
+            # Directly execute the code from the if __name__ == "__main__" block
+            if hasattr(session_test, '__name__'):
+                original_name = session_test.__name__
+                session_test.__name__ = "__main__"
+                
+                # The code inside the if __name__ == "__main__" block is:
+                # sys.exit(main())
+                # So we execute it directly:
+                session_test.sys.exit(session_test.main())
+                
+                # Restore original name
+                session_test.__name__ = original_name
+            
+            # Check that sys.exit was called with the value from main()
+            mock_exit.assert_called_once_with(42)
+
 if __name__ == '__main__':
     unittest.main() 

@@ -340,6 +340,309 @@ class TestMCPStdioTester(unittest.TestCase):
         self.assertEqual(params["protocolVersion"], "2025-03-26")
         self.assertEqual(params["clientInfo"]["name"], "MCP STDIO Tester")
 
+    @patch('mcp_testing.stdio.tester.MCPStdioTester._send_request')
+    def test_test_echo_tool_success(self, mock_send_request):
+        """Test the echo tool with successful response."""
+        # Setup mock response
+        success_response = {"result": {"result": "Hello, MCP STDIO server!"}}
+        mock_send_request.return_value = (True, success_response)
+        
+        # Call method
+        result = self.tester.test_echo_tool()
+        
+        # Verify
+        self.assertTrue(result)
+        mock_send_request.assert_called_once_with(
+            "invokeToolCall", 
+            {
+                "toolCall": {
+                    "id": "echo-test",
+                    "name": "echo", 
+                    "parameters": {"message": "Hello, MCP STDIO server!"}
+                }
+            }
+        )
+        
+        # Check log output
+        self.assertIn("Echo tool test passed", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester._send_request')
+    def test_test_echo_tool_failure(self, mock_send_request):
+        """Test the echo tool with failed response."""
+        # Setup mock response
+        mock_send_request.return_value = (False, {"error": "Tool not found"})
+        
+        # Call method
+        result = self.tester.test_echo_tool()
+        
+        # Verify
+        self.assertFalse(result)
+        
+        # Check log output
+        self.assertIn("Failed to invoke echo tool", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester._send_request')
+    def test_test_echo_tool_wrong_response(self, mock_send_request):
+        """Test the echo tool with incorrect response content."""
+        # Setup mock response with incorrect echo result
+        success_response = {"result": {"result": "Wrong response"}}
+        mock_send_request.return_value = (True, success_response)
+        
+        # Call method
+        result = self.tester.test_echo_tool()
+        
+        # Verify
+        self.assertFalse(result)
+        
+        # Check log output
+        self.assertIn("Echo tool returned unexpected result", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester._send_request')
+    def test_test_add_tool_success(self, mock_send_request):
+        """Test the add tool with successful response."""
+        # Setup mock response
+        # The implementation uses 5 and 7 as parameters, not 7 and 8
+        success_response = {"result": {"result": 12}}
+        mock_send_request.return_value = (True, success_response)
+        
+        # Call method
+        result = self.tester.test_add_tool()
+        
+        # Verify
+        self.assertTrue(result)
+        mock_send_request.assert_called_once_with(
+            "invokeToolCall", 
+            {
+                "toolCall": {
+                    "id": "add-test",
+                    "name": "add",
+                    "parameters": {"a": 5, "b": 7}
+                }
+            }
+        )
+        
+        # Check log output
+        self.assertIn("Add tool test passed", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester._send_request')
+    def test_test_add_tool_failure(self, mock_send_request):
+        """Test the add tool with failed response."""
+        # Setup mock response
+        mock_send_request.return_value = (False, {"error": "Tool not found"})
+        
+        # Call method
+        result = self.tester.test_add_tool()
+        
+        # Verify
+        self.assertFalse(result)
+        
+        # Check log output
+        self.assertIn("Failed to invoke add tool", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester._send_request')
+    def test_test_add_tool_wrong_response(self, mock_send_request):
+        """Test the add tool with incorrect response."""
+        # Setup mock response with incorrect addition result
+        success_response = {"result": {"result": 13}}  # Wrong result, should be 12
+        mock_send_request.return_value = (True, success_response)
+        
+        # Call method
+        result = self.tester.test_add_tool()
+        
+        # Verify
+        self.assertFalse(result)
+        
+        # Check log output
+        self.assertIn("Add tool returned unexpected result", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester._send_request')
+    @patch('mcp_testing.stdio.tester.time.time')
+    @patch('mcp_testing.stdio.tester.time.sleep')
+    def test_test_async_sleep_tool_success(self, mock_sleep, mock_time, mock_send_request):
+        """Test the async sleep tool with successful response."""
+        # Mock sleep to do nothing
+        mock_sleep.return_value = None
+        
+        # Setup time mock to always return the same value so the loop condition is always true
+        mock_time.return_value = 100
+        
+        # Setup mock responses for initial call and completion
+        invoke_response = {"result": {"status": "running", "toolCallId": "test-call-123"}}
+        status_response = {"result": {"status": "completed"}}
+        mock_send_request.side_effect = [
+            (True, invoke_response),  # First call - invokeToolCall
+            (True, status_response)   # Second call - getToolCallStatus
+        ]
+        
+        # Call method
+        result = self.tester.test_async_sleep_tool()
+        
+        # Verify
+        self.assertTrue(result)
+        
+        # Verify correct tool call
+        first_call = mock_send_request.call_args_list[0]
+        self.assertEqual(first_call[0][0], "invokeToolCall")
+        self.assertEqual(first_call[0][1]["toolCall"]["name"], "sleep")
+        self.assertEqual(first_call[0][1]["toolCall"]["parameters"]["duration"], 1)
+        
+        # Verify poll call
+        second_call = mock_send_request.call_args_list[1]
+        self.assertEqual(second_call[0][0], "getToolCallStatus")
+        self.assertEqual(second_call[0][1]["toolCallId"], "test-call-123")
+        
+        # Check log output
+        self.assertIn("Async sleep tool completed successfully", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester._send_request')
+    def test_test_async_sleep_tool_initial_call_failure(self, mock_send_request):
+        """Test the async sleep tool with failure on initial call."""
+        # Setup mock response
+        mock_send_request.return_value = (False, {"error": "Tool not found"})
+        
+        # Call method
+        result = self.tester.test_async_sleep_tool()
+        
+        # Verify
+        self.assertFalse(result)
+        
+        # Check log output
+        self.assertIn("Failed to invoke async sleep tool", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester._send_request')
+    def test_test_async_sleep_tool_poll_failure(self, mock_send_request):
+        """Test the async sleep tool with failure when polling for result."""
+        # Setup mock responses
+        call_response = {"result": {"toolCallId": "test-call-123"}}
+        poll_response = {"error": "Tool call not found"}
+        mock_send_request.side_effect = [(True, call_response), (False, poll_response)]
+        
+        # Call method
+        result = self.tester.test_async_sleep_tool()
+        
+        # Verify
+        self.assertFalse(result)
+        
+        # Check log output
+        self.assertIn("Failed to invoke async sleep tool", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.start_server')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.initialize')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.list_tools')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.test_echo_tool')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.test_add_tool')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.test_async_sleep_tool')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.stop_server')
+    def test_run_all_tests_success(self, mock_stop, mock_async, mock_add, 
+                                   mock_echo, mock_list, mock_init, mock_start):
+        """Test running all tests with all passing."""
+        # Setup mocks
+        mock_start.return_value = True
+        mock_init.return_value = True
+        mock_list.return_value = (True, [{"name": "echo"}, {"name": "add"}, {"name": "sleep"}])
+        mock_echo.return_value = True
+        mock_add.return_value = True
+        mock_async.return_value = True
+        
+        # Call method
+        result = self.tester.run_all_tests()
+        
+        # Verify
+        self.assertTrue(result)
+        mock_start.assert_called_once()
+        mock_init.assert_called_once()
+        mock_list.assert_called_once()
+        mock_echo.assert_called_once()
+        mock_add.assert_called_once()
+        mock_async.assert_called_once()
+        mock_stop.assert_called_once()
+        
+        # Check log output
+        self.assertIn("All tests completed successfully", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.start_server')
+    def test_run_all_tests_start_failure(self, mock_start):
+        """Test running all tests with server start failure."""
+        # Setup mock
+        mock_start.return_value = False
+        
+        # Call method
+        result = self.tester.run_all_tests()
+        
+        # Verify
+        self.assertFalse(result)
+        
+        # Check log output
+        self.assertIn("Failed to start server", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.start_server')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.initialize')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.stop_server')
+    def test_run_all_tests_init_failure(self, mock_stop, mock_init, mock_start):
+        """Test running all tests with server initialization failure."""
+        # Setup mocks
+        mock_start.return_value = True
+        mock_init.return_value = False
+        
+        # Call method
+        result = self.tester.run_all_tests()
+        
+        # Verify
+        self.assertFalse(result)
+        mock_stop.assert_called_once()
+        
+        # Check log output
+        self.assertIn("Failed to initialize server", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.start_server')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.initialize')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.list_tools')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.stop_server')
+    def test_run_all_tests_list_tools_failure(self, mock_stop, mock_list, mock_init, mock_start):
+        """Test running all tests with list_tools failure."""
+        # Setup mocks
+        mock_start.return_value = True
+        mock_init.return_value = True
+        mock_list.return_value = (False, [])
+        
+        # Call method
+        result = self.tester.run_all_tests()
+        
+        # Verify
+        self.assertFalse(result)
+        mock_stop.assert_called_once()
+        
+        # Check log output
+        self.assertIn("Failed to list tools", self.log_capture.getvalue())
+
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.start_server')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.initialize')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.list_tools')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.test_echo_tool')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.test_add_tool')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.test_async_sleep_tool')
+    @patch('mcp_testing.stdio.tester.MCPStdioTester.stop_server')
+    def test_run_all_tests_tool_test_failures(self, mock_stop, mock_async, mock_add, 
+                                             mock_echo, mock_list, mock_init, mock_start):
+        """Test running all tests with some tool tests failing."""
+        # Setup mocks
+        mock_start.return_value = True
+        mock_init.return_value = True
+        mock_list.return_value = (True, [{"name": "echo"}, {"name": "add"}, {"name": "sleep"}])
+        mock_echo.return_value = True
+        mock_add.return_value = False  # This test fails
+        mock_async.return_value = True
+        
+        # Call method
+        result = self.tester.run_all_tests()
+        
+        # Verify
+        self.assertFalse(result)
+        mock_stop.assert_called_once()
+        
+        # Check log output
+        self.assertIn("Add tool test failed", self.log_capture.getvalue())
+
 
 if __name__ == '__main__':
     unittest.main() 
