@@ -539,6 +539,8 @@ class TestMCPStdioTester(unittest.TestCase):
         # Setup mocks
         mock_start.return_value = True
         mock_init.return_value = True
+        # Test three scenarios:
+        # 1. All tools available
         mock_list.return_value = (True, [{"name": "echo"}, {"name": "add"}, {"name": "sleep"}])
         mock_echo.return_value = True
         mock_add.return_value = True
@@ -559,6 +561,58 @@ class TestMCPStdioTester(unittest.TestCase):
         
         # Check log output
         self.assertIn("All tests completed successfully", self.log_capture.getvalue())
+        
+        # Reset mocks for next test
+        mock_start.reset_mock()
+        mock_init.reset_mock()
+        mock_list.reset_mock()
+        mock_echo.reset_mock()
+        mock_add.reset_mock()
+        mock_async.reset_mock()
+        mock_stop.reset_mock()
+        self.log_capture.truncate(0)
+        self.log_capture.seek(0)
+        
+        # 2. Echo tool not available (should still succeed)
+        mock_start.return_value = True
+        mock_init.return_value = True
+        mock_list.return_value = (True, [{"name": "add"}, {"name": "sleep"}])
+        mock_add.return_value = True
+        mock_async.return_value = True
+        
+        # Call method
+        result = self.tester.run_all_tests()
+        
+        # Verify
+        self.assertTrue(result)
+        mock_echo.assert_not_called()
+        mock_add.assert_called_once()
+        
+        # Reset mocks for next test
+        mock_start.reset_mock()
+        mock_init.reset_mock()
+        mock_list.reset_mock()
+        mock_echo.reset_mock()
+        mock_add.reset_mock()
+        mock_async.reset_mock()
+        mock_stop.reset_mock()
+        self.log_capture.truncate(0)
+        self.log_capture.seek(0)
+        
+        # 3. Add tool not available (should still succeed)
+        mock_start.return_value = True
+        mock_init.return_value = True
+        mock_list.return_value = (True, [{"name": "echo"}, {"name": "sleep"}])
+        mock_echo.return_value = True
+        mock_async.return_value = True
+        
+        # Call method
+        result = self.tester.run_all_tests()
+        
+        # Verify
+        self.assertTrue(result)
+        mock_echo.assert_called_once()
+        mock_add.assert_not_called()
 
     @patch('mcp_testing.stdio.tester.MCPStdioTester.start_server')
     def test_run_all_tests_start_failure(self, mock_start):
@@ -642,6 +696,35 @@ class TestMCPStdioTester(unittest.TestCase):
         
         # Check log output
         self.assertIn("Add tool test failed", self.log_capture.getvalue())
+        
+        # Reset mocks for next test
+        mock_start.reset_mock()
+        mock_init.reset_mock()
+        mock_list.reset_mock()
+        mock_echo.reset_mock()
+        mock_add.reset_mock()
+        mock_async.reset_mock()
+        mock_stop.reset_mock()
+        self.log_capture.truncate(0)
+        self.log_capture.seek(0)
+        
+        # Test with only sleep available and failing
+        mock_start.return_value = True
+        mock_init.return_value = True
+        mock_list.return_value = (True, [{"name": "sleep"}])  # Only sleep available
+        mock_async.return_value = False  # Sleep test fails
+        
+        # Call method
+        result = self.tester.run_all_tests()
+        
+        # Verify
+        self.assertFalse(result)
+        mock_echo.assert_not_called()  # Echo tool not available
+        mock_add.assert_not_called()   # Add tool not available 
+        mock_stop.assert_called_once()
+        
+        # Check log output
+        self.assertIn("Async sleep tool test failed", self.log_capture.getvalue())
 
 
 if __name__ == '__main__':
