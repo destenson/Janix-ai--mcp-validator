@@ -12,7 +12,7 @@ Please be respectful and considerate of others when contributing to this project
 
 If you find a bug or have a suggestion for improvement:
 
-1. Check if the issue already exists in the [GitHub Issues](https://github.com/your-username/mcp-protocol-validator/issues)
+1. Check if the issue already exists in the [GitHub Issues](https://github.com/Janix-ai/mcp-protocol-validator/issues)
 2. If not, create a new issue using the appropriate template
 3. Provide as much detail as possible, including steps to reproduce, expected behavior, and your environment
 

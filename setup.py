@@ -7,13 +7,13 @@ setup(
     name="mcp-protocol-validator",
     version="1.0.0",
     author="Scott Wilcox",
-    author_email="example@example.com",  # Replace with actual email
+    author_email="scott@janix.ai",  # Updated email
     description="Testing framework and reference implementations for the Model Conversation Protocol (MCP)",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/scottwilcox/mcp-protocol-validator",
+    url="https://github.com/Janix-ai/mcp-protocol-validator",
     project_urls={
-        "Bug Tracker": "https://github.com/scottwilcox/mcp-protocol-validator/issues",
+        "Bug Tracker": "https://github.com/Janix-ai/mcp-protocol-validator/issues",
     },
     classifiers=[
         "Programming Language :: Python :: 3",

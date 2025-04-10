@@ -303,6 +303,87 @@ pytest
 pytest mcp_testing/tests/base_protocol/
 ```
 
+## Quick Start
+
+### Quickest Way to Test a Server
+
+For quick validation of MCP server implementations, you can use these minimal testing commands:
+
+#### For STDIO Servers:
+
+```bash
+# Basic interaction - simplest test to verify server works
+python -m mcp_testing.scripts.basic_interaction --server-command "./minimal_mcp_server/minimal_mcp_server.py"
+
+# Run a full compliance test
+python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26
+```
+
+#### For HTTP Servers:
+
+```bash
+# Quick HTTP test
+python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
+
+# Simple connectivity check
+python minimal_http_server/check_server.py http://localhost:8000/mcp
+```
+
+### Advanced Testing Options
+
+For more comprehensive testing with detailed options:
+
+#### STDIO Testing:
+
+```bash
+# Generate a detailed compliance report
+python -m mcp_testing.scripts.compliance_report \
+  --server-command "./minimal_mcp_server/minimal_mcp_server.py" \
+  --protocol-version 2025-03-26 \
+  --output-dir "./reports"
+
+# Test with timeout settings for better stability
+python -m mcp_testing.scripts.compliance_report \
+  --server-command "./minimal_mcp_server/minimal_mcp_server.py" \
+  --test-timeout 30 \
+  --tools-timeout 15
+
+# Test only tool functionality
+python -m mcp_testing.scripts.compliance_report \
+  --server-command "./minimal_mcp_server/minimal_mcp_server.py" \
+  --test-mode tools
+```
+
+#### HTTP Testing:
+
+```bash
+# Comprehensive HTTP test with debug output
+python -m mcp_testing.scripts.http_test \
+  --server-url http://localhost:8000/mcp \
+  --protocol-version 2025-03-26 \
+  --debug
+
+# Generate an HTTP test report
+python -m mcp_testing.scripts.http_test \
+  --server-url http://localhost:8000/mcp \
+  --protocol-version 2025-03-26 \
+  --output-dir "./reports"
+```
+
+For testing pip-installed servers, ensure you're in the same virtual environment:
+
+```bash
+# Install server and testing framework in the same environment
+pip install mcp-server-fetch sseclient-py==1.7.2
+
+# Test a pip-installed server
+python -m mcp_testing.scripts.basic_interaction \
+  --server-command "python -m mcp_server_fetch" \
+  --protocol-version 2024-11-05
+```
+
+See the [Testing Pip-Installed MCP Servers](#testing-pip-installed-mcp-servers) section for more details.
+
 ## License
 
 SPDX-License-Identifier: AGPL-3.0-or-later
