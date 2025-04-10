@@ -8,6 +8,7 @@ plan_pip.md
 SERVER_COMPATIBILITY.md
 mcp_testing/server_configs/*
 opensource_plan.md
+htmlcov
 
 # Virtual environment
 .venv/
