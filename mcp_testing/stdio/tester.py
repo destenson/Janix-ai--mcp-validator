@@ -39,7 +39,8 @@ class MCPStdioTester:
         if debug:
             logger.setLevel(logging.DEBUG)
         
-        logger.debug(f"Initialized tester with command: {server_command} {' '.join(args)}")
+            # Only log if debug is enabled and using the instance args (which is guaranteed to be a list)
+            logger.debug(f"Initialized tester with command: {server_command} {' '.join(self.args)}")
     
     def start_server(self) -> bool:
         """Start the server process.
