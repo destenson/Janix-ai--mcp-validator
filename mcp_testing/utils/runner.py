@@ -17,6 +17,7 @@ from typing import Dict, Any, List, Optional, Union, Callable, Tuple
 from mcp_testing.protocols.base import MCPProtocolAdapter
 from mcp_testing.transports.base import MCPTransportAdapter
 from mcp_testing.transports.stdio import StdioTransportAdapter
+from mcp_testing.transports.http import HttpTransportAdapter
 from mcp_testing.protocols.v2024_11_05 import MCP2024_11_05Adapter
 from mcp_testing.protocols.v2025_03_26 import MCP2025_03_26Adapter
 
@@ -58,17 +59,19 @@ class MCPTestRunner:
                       protocol_version: str,
                       test_name: str,
                       env_vars: Optional[Dict[str, str]] = None,
-                      timeout: Optional[int] = None) -> Dict[str, Any]:
+                      timeout: Optional[int] = None,
+                      transport_type: str = "stdio") -> Dict[str, Any]:
         """
         Run a single test case.
         
         Args:
             test_func: The test function to run
-            server_command: The command to launch the server
+            server_command: The command to launch the server or server URL for HTTP
             protocol_version: The protocol version to use
             test_name: The name of the test
             env_vars: Environment variables to pass to the server process
             timeout: Optional timeout in seconds for the test execution
+            transport_type: Type of transport to use ("stdio" or "http")
             
         Returns:
             A dictionary containing the test results
@@ -92,15 +95,24 @@ class MCPTestRunner:
         
         # Create a fresh transport adapter for each test
         if self.debug:
-            print(f"Starting server process: {server_command}")
-            if env_vars:
-                print(f"Environment variables: {env_vars}")
+            if transport_type == "stdio":
+                print(f"Starting server process: {server_command}")
+                if env_vars:
+                    print(f"Environment variables: {env_vars}")
+            else:
+                print(f"Connecting to server URL: {server_command}")
                 
-        transport_adapter = StdioTransportAdapter(
-            server_command=server_command,
-            env_vars=env_vars,
-            debug=self.debug
-        )
+        if transport_type == "stdio":
+            transport_adapter = StdioTransportAdapter(
+                server_command=server_command,
+                env_vars=env_vars,
+                debug=self.debug
+            )
+        else:  # HTTP transport
+            transport_adapter = HttpTransportAdapter(
+                server_url=server_command,
+                debug=self.debug
+            )
         
         # Create a fresh protocol adapter for each test
         if protocol_version == "2024-11-05":
@@ -202,67 +214,46 @@ class MCPTestRunner:
                     await protocol_adapter.exit()
                 except Exception as e:
                     if self.debug:
-                        print(f"Warning: Shutdown failed: {str(e)}")
-                    # If shutdown is explicitly not skipped but fails, propagate the error
-                    raise
-            else:
-                # Just exit without shutdown if shutdown is skipped
-                if self.debug:
-                    print(f"Skipping shutdown call as configured")
-                try:
-                    if self.debug:
-                        print(f"Sending exit notification...")
-                        
-                    await protocol_adapter.exit()
-                except Exception as e:
-                    if self.debug:
-                        print(f"Warning: Exit notification failed: {str(e)}")
+                        print(f"Error during shutdown: {str(e)}")
+                    # Don't fail the test just because shutdown failed
+                    pass
             
-            end_time = time.time()
-            duration = end_time - start_time
+            # Calculate test duration
+            duration = time.time() - start_time
             
-            # Build the result
+            # Store and return the result
             result = {
                 "name": test_name,
                 "passed": passed,
                 "message": message,
                 "duration": duration
             }
-            
-            if self.debug:
-                status = "PASSED" if passed else "FAILED"
-                print(f"Test {test_name}: {status} ({duration:.2f}s)")
-                if message:
-                    print(f"  {message}")
-                    
             self.results[test_name] = result
             return result
             
         except Exception as e:
-            end_time = time.time()
-            duration = end_time - start_time
+            duration = time.time() - start_time
+            error_message = f"Test failed with error: {str(e)}"
+            if self.debug:
+                print(error_message)
+                import traceback
+                traceback.print_exc()
             
-            # Build the error result
             result = {
                 "name": test_name,
                 "passed": False,
-                "message": f"Test raised exception: {str(e)}",
-                "duration": duration,
-                "exception": str(e)
+                "message": error_message,
+                "duration": duration
             }
-            
-            if self.debug:
-                print(f"Test {test_name}: ERROR ({duration:.2f}s)")
-                print(f"  Exception: {str(e)}")
-                
             self.results[test_name] = result
             return result
+            
         finally:
-            # Always stop the transport when done
-            if self.debug:
-                print(f"Stopping server process...")
-                
-            transport_adapter.stop()
+            # Always terminate the transport
+            try:
+                await transport_adapter.terminate()
+            except:
+                pass
     
     async def run_tests(self, tests: List[Tuple[Callable[[MCPProtocolAdapter], Tuple[bool, str]], str]], 
                        protocol: str = "2024-11-05",
@@ -274,57 +265,50 @@ class MCPTestRunner:
         Run a list of test cases.
         
         Args:
-            tests: A list of (test_func, test_name) tuples
-            protocol: The protocol version to use
-            transport: The transport to use
-            server_command: The command to launch the server
-            env_vars: Environment variables to pass to the server process
-            timeout: Optional timeout in seconds for each test execution
+            tests: List of (test_func, test_name) tuples
+            protocol: Protocol version to use
+            transport: Transport type to use ("stdio" or "http")
+            server_command: Command to launch server or server URL for HTTP
+            env_vars: Environment variables to pass to server process
+            timeout: Optional timeout in seconds for test execution
             
         Returns:
             A dictionary containing the aggregated test results
         """
-        if transport != "stdio":
-            raise ValueError(f"Unsupported transport: {transport}")
-            
         if not server_command:
-            raise ValueError("server_command is required for stdio transport")
+            raise ValueError("server_command is required")
             
+        results = {
+            "results": [],
+            "passed": 0,
+            "failed": 0,
+            "skipped": 0,
+            "timeouts": 0
+        }
+        
         for test_func, test_name in tests:
-            # Use a timeout for tools-related tests if not explicitly specified
-            test_timeout = timeout
-            if timeout is None and (test_name.startswith("test_tools_") or test_name.startswith("test_tool_")):
-                # Default timeout of 30 seconds for tools tests
-                test_timeout = 30
-                
-            await self.run_test(
+            result = await self.run_test(
                 test_func=test_func,
                 server_command=server_command,
                 protocol_version=protocol,
                 test_name=test_name,
                 env_vars=env_vars,
-                timeout=test_timeout
+                timeout=timeout,
+                transport_type=transport
             )
             
-        # Count results
-        total = len(tests)
-        passed = sum(1 for r in self.results.values() if r.get("passed", False))
-        failed = total - passed
-        skipped = sum(1 for r in self.results.values() if r.get("skipped", False))
-        timeouts = sum(1 for r in self.results.values() if r.get("timeout", False))
-        
-        # Organize results by test name
-        results_list = [self.results.get(test_name, {"name": test_name, "passed": False, "message": "Test not run"}) 
-                        for _, test_name in tests]
-        
-        return {
-            "results": results_list,
-            "total": total,
-            "passed": passed,
-            "failed": failed,
-            "skipped": skipped,
-            "timeouts": timeouts
-        }
+            results["results"].append(result)
+            
+            if result.get("skipped", False):
+                results["skipped"] += 1
+            elif result.get("timeout", False):
+                results["timeouts"] += 1
+            elif result["passed"]:
+                results["passed"] += 1
+            else:
+                results["failed"] += 1
+                
+        return results
 
 
 # Convenience function to run tests

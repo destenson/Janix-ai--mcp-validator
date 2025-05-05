@@ -29,8 +29,7 @@ class HttpTransportAdapter(MCPTransportAdapter):
                  server_url: Optional[str] = None, 
                  headers: Optional[Dict[str, str]] = None,
                  debug: bool = False,
-                 timeout: float = 30.0,
-                 use_sse: bool = False):
+                 timeout: float = 30.0):
         """
         Initialize the HTTP transport adapter.
         
@@ -43,12 +42,16 @@ class HttpTransportAdapter(MCPTransportAdapter):
             headers: HTTP headers to include in all requests
             debug: Whether to enable debug output
             timeout: Request timeout in seconds
-            use_sse: Whether to use Server-Sent Events for notifications
             
         Note:
             Either server_command or server_url must be provided.
         """
         super().__init__(debug)
+        
+        # For compatibility with the test runner, treat server_command as server_url if it's a URL
+        if server_command and (server_command.startswith("http://") or server_command.startswith("https://")):
+            server_url = server_command
+            server_command = None
         
         if not server_command and not server_url:
             raise ValueError("Either server_command or server_url must be provided")
@@ -56,15 +59,16 @@ class HttpTransportAdapter(MCPTransportAdapter):
         self.server_command = server_command
         self.server_url = server_url
         self.headers = headers or {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Accept": "application/json"
         }
         self.timeout = timeout
-        self.use_sse = use_sse
         self.process = None
         self.session = requests.Session()
-        self.sse_client = None
         self.notification_queue = asyncio.Queue()
         self.logger = logging.getLogger("HttpTransportAdapter")
+        self._notification_task = None
+        self._should_stop = False
         
         if debug:
             self.logger.setLevel(logging.DEBUG)
@@ -104,17 +108,20 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 if not self.server_url:
                     self.server_url = "http://localhost:8000"  # Default URL
                     
-            # Verify connectivity
+            # Verify connectivity with a POST request
             self.logger.debug(f"Verifying connectivity to {self.server_url}")
-            response = self.session.options(self.server_url, timeout=self.timeout)
+            response = self.session.post(
+                self.server_url,
+                json={"jsonrpc": "2.0", "method": "ping", "id": "connection-test"},
+                headers=self.headers,
+                timeout=self.timeout
+            )
             response.raise_for_status()
             
-            # If using SSE, set up the SSE client
-            if self.use_sse:
-                self.logger.debug("Setting up SSE client")
-                sse_url = urljoin(self.server_url, "/notifications")
-                headers = {**self.headers, "Accept": "text/event-stream"}
-                self._start_sse_listener(sse_url, headers)
+            # Start background task to poll for notifications
+            self._should_stop = False
+            loop = asyncio.get_event_loop()
+            self._notification_task = loop.create_task(self._poll_notifications())
             
             self.is_started = True
             return True
@@ -134,11 +141,12 @@ class HttpTransportAdapter(MCPTransportAdapter):
             True if stopped successfully, False otherwise
         """
         try:
-            # Close the SSE client if it exists
-            if self.sse_client:
-                self.logger.debug("Closing SSE client")
-                # SSE client doesn't typically have a close method, but we can cleanup the connection
-                self.sse_client = None
+            # Stop the notification polling task
+            self._should_stop = True
+            if self._notification_task:
+                self.logger.debug("Cancelling notification polling task")
+                self._notification_task.cancel()
+                self._notification_task = None
             
             # Close the session
             self.logger.debug("Closing HTTP session")
@@ -162,6 +170,65 @@ class HttpTransportAdapter(MCPTransportAdapter):
             self.logger.error(f"Failed to stop HTTP transport: {str(e)}")
             return False
     
+    async def _poll_notifications(self) -> None:
+        """
+        Poll for notifications using POST requests.
+        """
+        while not self._should_stop:
+            try:
+                # Send a POST request to check for notifications
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.session.post(
+                        self.server_url,
+                        json={"jsonrpc": "2.0", "method": "notifications/poll", "id": "poll"},
+                        headers=self.headers,
+                        timeout=self.timeout
+                    )
+                )
+                response.raise_for_status()
+                
+                # Parse response
+                data = response.json()
+                if "result" in data and isinstance(data["result"], list):
+                    for notification in data["result"]:
+                        await self.notification_queue.put(notification)
+                
+                # Wait before next poll
+                await asyncio.sleep(1.0)  # Poll every second
+                
+            except Exception as e:
+                if not self._should_stop:
+                    self.logger.warning(f"Error polling for notifications: {str(e)}")
+                    await asyncio.sleep(5.0)  # Wait longer after error
+    
+    async def get_next_notification(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the next notification from the notification queue.
+        
+        Returns:
+            The next notification, or None if notifications are not enabled or times out
+            
+        Note:
+            This is an async method that waits for the next notification.
+        """
+        if not self.is_started:
+            return None
+            
+        try:
+            # Wait for the next notification (with timeout)
+            notification = await asyncio.wait_for(
+                self.notification_queue.get(),
+                timeout=self.timeout
+            )
+            return notification
+            
+        except asyncio.TimeoutError:
+            return None
+        except Exception as e:
+            self.logger.error(f"Failed to get next notification: {str(e)}")
+            return None
+    
     def send_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Send a JSON-RPC request and wait for a response.
@@ -179,16 +246,13 @@ class HttpTransportAdapter(MCPTransportAdapter):
             raise ConnectionError("Transport not started")
             
         try:
-            # Convert request to JSON
-            request_str = json.dumps(request)
-            
             if self.debug:
-                self.logger.debug(f"Sending request: {request_str}")
+                self.logger.debug(f"Sending request: {json.dumps(request)}")
             
             # Send the HTTP request
             response = self.session.post(
                 self.server_url,
-                data=request_str,
+                json=request,  # Use json parameter for automatic serialization
                 headers=self.headers,
                 timeout=self.timeout
             )
@@ -225,16 +289,13 @@ class HttpTransportAdapter(MCPTransportAdapter):
             raise ConnectionError("Transport not started")
             
         try:
-            # Convert notification to JSON
-            notification_str = json.dumps(notification)
-            
             if self.debug:
-                self.logger.debug(f"Sending notification: {notification_str}")
+                self.logger.debug(f"Sending notification: {json.dumps(notification)}")
             
             # Send the HTTP request (no response expected)
             response = self.session.post(
                 self.server_url,
-                data=notification_str,
+                json=notification,  # Use json parameter for automatic serialization
                 headers=self.headers,
                 timeout=self.timeout
             )
@@ -264,16 +325,13 @@ class HttpTransportAdapter(MCPTransportAdapter):
             raise ConnectionError("Transport not started")
             
         try:
-            # Convert batch to JSON
-            batch_str = json.dumps(requests)
-            
             if self.debug:
-                self.logger.debug(f"Sending batch request: {batch_str}")
+                self.logger.debug(f"Sending batch request: {json.dumps(requests)}")
             
             # Send the HTTP request
             response = self.session.post(
                 self.server_url,
-                data=batch_str,
+                json=requests,  # Use json parameter for automatic serialization
                 headers=self.headers,
                 timeout=self.timeout
             )
@@ -298,48 +356,4 @@ class HttpTransportAdapter(MCPTransportAdapter):
         except json.JSONDecodeError as e:
             raise ConnectionError(f"Invalid JSON response: {str(e)}")
         except Exception as e:
-            raise ConnectionError(f"Failed to send batch request: {str(e)}")
-    
-    def _start_sse_listener(self, sse_url: str, headers: Dict[str, str]) -> None:
-        """
-        Start a background thread to listen for SSE events.
-        
-        Args:
-            sse_url: The URL to connect to for SSE events
-            headers: HTTP headers to use for the SSE connection
-        """
-        try:
-            # This would typically be implemented with a background thread
-            # that listens for SSE events and adds them to the notification queue.
-            # For simplicity, we're not implementing the full background thread here.
-            pass
-            
-        except Exception as e:
-            self.logger.error(f"Failed to start SSE listener: {str(e)}")
-    
-    async def get_next_notification(self) -> Optional[Dict[str, Any]]:
-        """
-        Get the next notification from the notification queue.
-        
-        Returns:
-            The next notification, or None if the queue is empty
-            
-        Note:
-            This is an async method that waits for the next notification.
-        """
-        if not self.is_started or not self.use_sse:
-            return None
-            
-        try:
-            # Wait for the next notification (with timeout)
-            notification = await asyncio.wait_for(
-                self.notification_queue.get(),
-                timeout=self.timeout
-            )
-            return notification
-            
-        except asyncio.TimeoutError:
-            return None
-        except Exception as e:
-            self.logger.error(f"Failed to get next notification: {str(e)}")
-            return None 
+            raise ConnectionError(f"Failed to send batch request: {str(e)}") 

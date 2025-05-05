@@ -160,76 +160,63 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
             self._send_error(404, "Not Found - MCP endpoint is at /mcp")
             return
         
-        # Any path is acceptable for the SSE endpoint
         # Check if client accepts SSE
         accept_header = self.headers.get('Accept', '')
         if 'text/event-stream' not in accept_header:
             self._send_error(406, "Not Acceptable: Client must accept text/event-stream")
             return
             
-        # Set up SSE response
+        # Get session ID and verify session
+        session_id = self._get_session_id()
+        if not session_id or not self._verify_session():
+            self._send_error(401, "Unauthorized: Valid session ID required")
+            return
+            
+        # Set up SSE response headers
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('Connection', 'keep-alive')
         self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id')
         self.end_headers()
         
-        # Create a message queue for this connection
-        message_queue = queue.Queue()
-        
-        # Add this connection to the list of SSE connections
+        # Create connection info
         connection_id = str(uuid.uuid4())
-        
-        # If session ID is provided, associate this connection with the session
-        session_id = self._get_session_id()
-        
         connection_info = {
             "id": connection_id,
-            "queue": message_queue,
             "wfile": self.wfile,
             "session_id": session_id,
             "created": time.time()
         }
         
+        # Add to active connections
         server_state["sse_connections"].append(connection_info)
         
         logger.info(f"SSE connection established: {connection_id} for session: {session_id}")
         
         try:
             # Send initial connection message
-            self.wfile.write(f"event: connected\ndata: {{'connectionId': '{connection_id}'}}\n\n".encode('utf-8'))
+            self.wfile.write(f"event: connected\ndata: {json.dumps({'connectionId': connection_id})}\n\n".encode('utf-8'))
             self.wfile.flush()
             
-            # Keep the connection open
+            # Keep the connection alive
             while not server_state["shutdown_requested"]:
                 try:
-                    # Check for messages in the queue (non-blocking)
-                    try:
-                        message = message_queue.get(block=True, timeout=1.0)
-                        
-                        # Format the message as an SSE event
-                        event_type = message.get("event", "message")
-                        message_data = json.dumps(message.get("data", {}))
-                        
-                        # Send the message as an SSE event
-                        self.wfile.write(f"event: {event_type}\ndata: {message_data}\n\n".encode('utf-8'))
-                        self.wfile.flush()
-                        
-                    except queue.Empty:
-                        # Send a keep-alive comment every second
-                        self.wfile.write(": keep-alive\n\n".encode('utf-8'))
-                        self.wfile.flush()
-                        
+                    # Send keep-alive comment every 15 seconds
+                    self.wfile.write(": keep-alive\n\n".encode('utf-8'))
+                    self.wfile.flush()
+                    time.sleep(15)
+                    
                 except (BrokenPipeError, ConnectionResetError):
                     # Connection closed by client
                     break
-        
+                    
         except Exception as e:
             logger.error(f"SSE connection error: {str(e)}")
             
         finally:
-            # Remove this connection from the list
+            # Remove this connection from active connections
             server_state["sse_connections"] = [
                 conn for conn in server_state["sse_connections"]
                 if conn["id"] != connection_id
@@ -815,58 +802,43 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
     
     def _handle_send_notification(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle sending a notification via SSE.
+        Handle the notifications/send method (2025-03-26 only).
         
         Args:
-            params: The notification parameters
+            params: The method parameters
             
         Returns:
             Success status
             
         Raises:
-            JSONRPCError: If sending fails
+            JSONRPCError: If sending the notification fails
         """
         # Validate params
-        if "event" not in params:
-            raise JSONRPCError(-32602, "Missing required parameter: event")
-        
+        if "type" not in params:
+            raise JSONRPCError(-32602, "Missing required parameter: type")
         if "data" not in params:
             raise JSONRPCError(-32602, "Missing required parameter: data")
+            
+        notification_type = params["type"]
+        notification_data = params["data"]
+        target_session = params.get("session")  # Optional session ID
         
-        # Get target session ID (optional)
-        target_session = params.get("sessionId")
-        
-        # Broadcast or send to specific session
-        sent_count = 0
-        
-        if target_session:
-            # Send to specific session
-            for conn in server_state["sse_connections"]:
-                if conn.get("session_id") == target_session:
-                    try:
-                        conn["queue"].put({
-                            "event": params["event"],
-                            "data": params["data"]
-                        })
-                        sent_count += 1
-                    except Exception as e:
-                        logger.error(f"Failed to send notification to connection {conn['id']}: {str(e)}")
-        else:
-            # Broadcast to all connections
-            for conn in server_state["sse_connections"]:
-                try:
-                    conn["queue"].put({
-                        "event": params["event"],
-                        "data": params["data"]
-                    })
-                    sent_count += 1
-                except Exception as e:
-                    logger.error(f"Failed to send notification to connection {conn['id']}: {str(e)}")
-        
-        return {
-            "success": sent_count > 0,
-            "sentCount": sent_count
+        # Prepare the notification message
+        message = {
+            "type": notification_type,
+            "data": notification_data
         }
+        
+        # If a specific session is targeted, send only to that session
+        if target_session:
+            if target_session not in server_state["sessions"]:
+                raise JSONRPCError(-32602, f"Unknown session: {target_session}")
+            send_sse_message_to_session(target_session, message, "notification")
+        else:
+            # Broadcast to all sessions
+            broadcast_sse_message(message, "notification")
+        
+        return {"success": True}
     
     def _call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         """
@@ -1009,16 +981,22 @@ def broadcast_sse_message(message: Dict[str, Any], event_type: str = "message"):
         message: The message to broadcast
         event_type: The SSE event type
     """
-    for connection in server_state["sse_connections"]:
+    # Convert message to JSON
+    message_json = json.dumps(message)
+    
+    # Format as SSE event
+    sse_data = f"event: {event_type}\ndata: {message_json}\n\n"
+    sse_bytes = sse_data.encode('utf-8')
+    
+    # Send to all active connections
+    for conn in server_state["sse_connections"]:
         try:
-            connection["queue"].put({
-                "event": event_type,
-                "data": message
-            })
-        except Exception as e:
-            logger.error(f"Failed to queue message for connection {connection['id']}: {str(e)}")
-
-# Function to send a message to a specific session's SSE connections
+            conn["wfile"].write(sse_bytes)
+            conn["wfile"].flush()
+        except (BrokenPipeError, ConnectionResetError):
+            # Connection is dead, will be cleaned up by the GET handler
+            continue
+            
 def send_sse_message_to_session(session_id: str, message: Dict[str, Any], event_type: str = "message"):
     """
     Send a message to all SSE connections for a specific session.
@@ -1028,17 +1006,19 @@ def send_sse_message_to_session(session_id: str, message: Dict[str, Any], event_
         message: The message to send
         event_type: The SSE event type
     """
-    sent = False
+    # Convert message to JSON
+    message_json = json.dumps(message)
     
-    for connection in server_state["sse_connections"]:
-        if connection.get("session_id") == session_id:
+    # Format as SSE event
+    sse_data = f"event: {event_type}\ndata: {message_json}\n\n"
+    sse_bytes = sse_data.encode('utf-8')
+    
+    # Send to all connections for this session
+    for conn in server_state["sse_connections"]:
+        if conn["session_id"] == session_id:
             try:
-                connection["queue"].put({
-                    "event": event_type,
-                    "data": message
-                })
-                sent = True
-            except Exception as e:
-                logger.error(f"Failed to queue message for connection {connection['id']}: {str(e)}")
-    
-    return sent 
+                conn["wfile"].write(sse_bytes)
+                conn["wfile"].flush()
+            except (BrokenPipeError, ConnectionResetError):
+                # Connection is dead, will be cleaned up by the GET handler
+                continue 
