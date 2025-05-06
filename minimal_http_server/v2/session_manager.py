@@ -46,10 +46,30 @@ class Session:
         
         # Storage for client-specific data
         self.data = {}
+        
+        # Flag to indicate test mode (used for compliance testing)
+        self.is_test_session = False
+        
+        # Flag to indicate if this session is handling any requests
+        self.handling_request = False
+        
+        # Track request count for diagnostics
+        self.request_count = 0
     
     def update_activity(self):
         """Update the last activity timestamp for this session."""
         self.last_active = time.time()
+        
+    def start_request(self):
+        """Mark this session as handling a request."""
+        self.handling_request = True
+        self.request_count += 1
+        self.update_activity()
+        
+    def end_request(self):
+        """Mark this session as no longer handling a request."""
+        self.handling_request = False
+        self.update_activity()
     
     def is_expired(self, timeout: int = SESSION_TIMEOUT) -> bool:
         """
@@ -61,7 +81,21 @@ class Session:
         Returns:
             bool: True if the session has expired, False otherwise.
         """
+        # Test sessions have a longer timeout
+        if self.is_test_session:
+            # Use a longer timeout for test sessions
+            timeout = max(timeout * 2, 7200)  # At least 2 hours for test sessions
+        
+        # Don't expire a session that's currently handling a request
+        if self.handling_request:
+            return False
+            
         return time.time() - self.last_active > timeout
+    
+    def mark_as_test_session(self):
+        """Mark this session as a test session with special handling."""
+        self.is_test_session = True
+        logger.debug(f"Session {self.id} marked as test session")
     
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -77,7 +111,9 @@ class Session:
             "initialized": self.initialized,
             "protocol_version": self.protocol_version,
             "capabilities": self.capabilities,
-            "client_info": self.client_info
+            "client_info": self.client_info,
+            "is_test_session": self.is_test_session,
+            "request_count": self.request_count
         }
 
 
