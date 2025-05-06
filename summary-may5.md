@@ -2,7 +2,7 @@
 
 ## Current State
 
-The HTTP server implementation has made significant progress with both basic functionality and SSE (Server-Sent Events) support working. Here's a detailed breakdown:
+The HTTP server implementation has made significant progress but needs alignment with STDIO server testing methodology for consistent validation.
 
 ### Working Features
 1. Basic HTTP/JSON-RPC Protocol
@@ -20,70 +20,132 @@ The HTTP server implementation has made significant progress with both basic fun
 
 3. SSE Implementation
    - Connection establishment successful
-   - Unique connection IDs generated
-   - Keep-alive messages working
-   - Basic notification broadcasting functional
+   - Event streaming working
+   - Notification delivery functional
 
-### Current Issues
+### Testing Alignment Plan
 
-1. Notification System Bug
-   ```
-   ERROR - Unhandled error: name 'broadcast_sse_message' is not defined
-   ```
-   - Function reference error in notification handling
-   - Needs proper function definition or import
+The current testing approach needs to be unified between STDIO and HTTP servers. Here are the next steps:
 
-2. Notification Polling Loop
-   - Multiple rapid `notifications/poll` requests observed
-   - Potential performance impact
-   - Need rate limiting or debouncing implementation
+1. Test Runner Consolidation
+   - Use `compliance_report.py` as the base for both STDIO and HTTP testing
+   - Adapt the HTTP transport layer to work with the compliance report framework
+   - Ensure consistent test case execution between both transport types
+
+2. Required Changes
+   - Create an HTTP transport adapter for the compliance report framework
+   - Modify test runner to handle both STDIO and HTTP transports
+   - Update test case execution to be transport-agnostic
+   - Ensure consistent reporting format between both server types
+
+3. Implementation Steps
+   a. Transport Layer:
+      - Create `HttpTransportAdapter` class implementing the same interface as STDIO
+      - Add HTTP-specific connection handling and session management
+      - Implement proper cleanup and resource management
+
+   b. Test Runner:
+      - Update `run_tests` function to accept transport type
+      - Add HTTP-specific configuration options
+      - Ensure consistent timeout handling between transports
+
+   c. Reporting:
+      - Use same report format for both STDIO and HTTP
+      - Include transport-specific details in reports
+      - Generate consistent compliance status indicators
+
+4. Validation Process
+   - Run same test suite against both server types
+   - Compare reports to ensure consistency
+   - Verify that all 37 core tests run on both transports
+   - Ensure identical pass/fail criteria
+
+### Next Actions
+1. Create `HttpTransportAdapter` class
+2. Modify `compliance_report.py` to handle HTTP transport
+3. Update test runner configuration
+4. Test with both server types and verify consistency
+
+### Known Issues
+1. HTTP server currently tested with different methodology than STDIO
+2. Reports not consistent between server types
+3. Some test cases may need adaptation for HTTP transport
 
 ### Test Results
+- STDIO Server: 37 tests passing
+- HTTP Server: Testing methodology needs alignment
 
-Recent test runs show:
-1. Successful SSE connection establishment
-2. Working async tool calls (sleep test passing)
-3. Basic tool operations (echo, add) functioning
-4. Session management maintaining state
+### Notes
+- The goal is to have identical test coverage and reporting between both server types
+- This will ensure consistent compliance validation regardless of transport
+- The unified approach will make it easier to maintain and extend the test suite
 
-### Test Commands Used
+## Current Issues
 
-```bash
-# Start server
-python minimal_http_server/minimal_http_server.py --port 8000 --debug
+1. Testing Methodology Inconsistency
+   - HTTP server using different testing approach than STDIO
+   - Need to align with compliance_report.py methodology
+   - Missing comprehensive test coverage compared to STDIO (37 tests)
 
-# Test SSE connection
-curl -N -H "Accept: text/event-stream" -H "Mcp-Session-Id: test-session" http://localhost:8000/mcp
+2. Notification System Issues
+   - Function reference error in notification handling
+   - Multiple rapid `notifications/poll` requests
+   - Need rate limiting implementation
 
-# Send test notification
-curl -X POST -H "Content-Type: application/json" -H "Accept: application/json" \
-     -H "Mcp-Session-Id: test-session" \
-     -d '{"jsonrpc":"2.0","method":"notifications/send","id":"test-1","params":{"type":"test","data":{"message":"Hello SSE!"}}}' \
-     http://localhost:8000/mcp
-```
+### Required Changes
+
+1. Testing Framework Alignment
+   - Modify compliance_report.py to support both STDIO and HTTP
+   - Add transport type parameter (--transport-type stdio|http)
+   - Ensure consistent test cases across both transports
+
+2. Test Coverage Gaps
+   - Protocol version negotiation
+   - Error handling scenarios
+   - Session management
+   - Notification delivery
+   - Resource management
+   - Tool execution (sync/async)
 
 ## Next Steps
 
-1. Fix Notification System
-   - Implement missing `broadcast_sse_message` function
-   - Add proper error handling for notification failures
-   - Test notification delivery across multiple sessions
+1. Testing Framework Updates
+   - Create HTTP transport adapter in compliance_report.py
+   - Add HTTP-specific configuration options
+   - Implement request/response mapping for HTTP transport
+   - Add session management handling
 
-2. Optimize Polling
-   - Add rate limiting for poll requests
-   - Implement more efficient notification delivery
-   - Consider WebSocket alternative for real-time updates
+2. Test Suite Alignment
+   - Port all 37 STDIO tests to HTTP format
+   - Add HTTP-specific test cases if needed
+   - Ensure identical validation criteria
 
-3. Testing and Validation
-   - Complete remaining test cases
-   - Add error condition tests
-   - Validate session management edge cases
-   - Test concurrent connections
+3. Implementation Fixes
+   - Fix notification system bugs
+   - Add proper rate limiting
+   - Improve error handling
+   - Add missing protocol features
 
 4. Documentation
-   - Update API documentation
-   - Add example usage for each endpoint
-   - Document rate limiting when implemented
+   - Update testing documentation
+   - Add HTTP-specific test instructions
+   - Document transport differences
+
+## Test Commands
+
+### Current HTTP Testing
+```bash
+python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
+```
+
+### Proposed New Testing
+```bash
+# STDIO Testing (Current)
+python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26
+
+# HTTP Testing (To Be Implemented)
+python -m mcp_testing.scripts.compliance_report --transport-type http --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
+```
 
 ## Environment
 

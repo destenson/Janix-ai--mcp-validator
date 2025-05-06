@@ -194,10 +194,12 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
             return
             
         self.send_response(200)
-        self.send_header('Allow', 'OPTIONS, POST, GET, DELETE')
+        self.send_header('Allow', 'OPTIONS, POST, GET')
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, DELETE')
+        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id')
+        self.send_header('Access-Control-Max-Age', '86400')  # Cache preflight for 24 hours
+        self.send_header('Content-Length', '0')  # Important to avoid keep-alive issues
         self.end_headers()
     
     def do_DELETE(self):
@@ -559,41 +561,55 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
             
         Returns:
             Server info and capabilities
-        """
-        # Check if protocol version is supported
-        protocol_version = params.get("protocolVersion")
-        if not protocol_version:
-            raise JSONRPCError(-32602, "Missing required parameter: protocolVersion")
             
+        Raises:
+            JSONRPCError: If initialization fails
+        """
+        # Check if already initialized
+        if server_state["initialized"]:
+            raise JSONRPCError(-32002, "Server already initialized")
+        
+        # Validate required parameters
+        if "protocolVersion" not in params:
+            raise JSONRPCError(-32602, "Missing required parameter: protocolVersion")
+        if "clientInfo" not in params:
+            raise JSONRPCError(-32602, "Missing required parameter: clientInfo")
+        if "capabilities" not in params:
+            raise JSONRPCError(-32602, "Missing required parameter: capabilities")
+        
+        # Validate protocol version
+        protocol_version = params["protocolVersion"]
         if protocol_version not in SUPPORTED_VERSIONS:
             raise JSONRPCError(-32602, f"Unsupported protocol version: {protocol_version}")
-            
-        # Generate new session ID
-        session_id = str(uuid.uuid4())
+        
+        # Store protocol version
+        server_state["protocol_version"] = protocol_version
+        server_state["initialized"] = True
+        
+        # Create new session if none exists
+        session_id = self._get_session_id()
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            self.send_header('Mcp-Session-Id', session_id)
         
         # Store session info
         server_state["sessions"][session_id] = {
-            "protocol_version": protocol_version,
-            "capabilities": params.get("capabilities", {}),
-            "client_info": params.get("clientInfo", {}),
-            "created": time.time()
+            "id": session_id,
+            "created": time.time(),
+            "last_poll_time": time.time(),
+            "capabilities": params["capabilities"],
+            "protocol_version": protocol_version
         }
         
-        # Set response headers for session ID
-        self.send_header("Mcp-Session-Id", session_id)
-        
-        # Update server state
-        server_state["initialized"] = True
-        server_state["protocol_version"] = protocol_version
-        
+        # Return server info and capabilities
         return {
-            "protocolVersion": protocol_version,
             "serverInfo": {
-                "name": "Minimal MCP HTTP Server",
+                "name": "MinimalHTTPMCPServer",
                 "version": "1.0.0",
-                "supportedVersions": SUPPORTED_VERSIONS
+                "protocolVersion": protocol_version
             },
             "capabilities": {
+                "protocolVersion": protocol_version,
                 "tools": {
                     "asyncSupported": True
                 },
@@ -863,21 +879,20 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
             "data": notification_data
         }
         
-        # If target session specified, send only to that session
-        if target_session:
-            if target_session not in server_state["sessions"]:
-                raise JSONRPCError(-32602, f"Invalid session ID: {target_session}")
-            if target_session not in server_state["notifications"]:
-                server_state["notifications"][target_session] = []
-            server_state["notifications"][target_session].append(notification)
-        else:
-            # Broadcast to all sessions
-            for session_id in server_state["sessions"]:
-                if session_id not in server_state["notifications"]:
-                    server_state["notifications"][session_id] = []
-                server_state["notifications"][session_id].append(notification)
-        
-        return {"success": True}
+        try:
+            # If target session specified, send only to that session
+            if target_session:
+                if target_session not in server_state["sessions"]:
+                    raise JSONRPCError(-32602, f"Invalid session ID: {target_session}")
+                send_sse_message_to_session(target_session, notification, "notification")
+            else:
+                # Broadcast to all sessions
+                broadcast_sse_message(notification, "notification")
+            
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"Failed to send notification: {str(e)}")
+            raise JSONRPCError(-32603, f"Failed to send notification: {str(e)}")
     
     def _handle_notifications_poll(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -896,6 +911,17 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
         if not session_id or session_id not in server_state["sessions"]:
             raise JSONRPCError(-32002, "Invalid session")
             
+        # Rate limit polling - check last poll time
+        session = server_state["sessions"][session_id]
+        current_time = time.time()
+        if "last_poll_time" in session:
+            time_since_last_poll = current_time - session["last_poll_time"]
+            if time_since_last_poll < 1.0:  # Minimum 1 second between polls
+                raise JSONRPCError(-32000, "Rate limit exceeded - wait at least 1 second between polls")
+        
+        # Update last poll time
+        session["last_poll_time"] = current_time
+        
         # Get and clear pending notifications for this session
         notifications = server_state["notifications"].get(session_id, [])
         server_state["notifications"][session_id] = []
