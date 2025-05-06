@@ -69,6 +69,7 @@ class HttpTransportAdapter(MCPTransportAdapter):
         self.logger = logging.getLogger("HttpTransportAdapter")
         self._notification_task = None
         self._should_stop = False
+        self.session_id = None
         
         if debug:
             self.logger.setLevel(logging.DEBUG)
@@ -108,15 +109,42 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 if not self.server_url:
                     self.server_url = "http://localhost:8000"  # Default URL
                     
-            # Verify connectivity with a POST request
+            # Verify connectivity with an initialize request
             self.logger.debug(f"Verifying connectivity to {self.server_url}")
+            init_request = {
+                "jsonrpc": "2.0",
+                "method": "initialize",
+                "id": "connection-test",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {
+                        "name": "MCPTestingFramework",
+                        "version": "1.0.0"
+                    }
+                }
+            }
             response = self.session.post(
                 self.server_url,
-                json={"jsonrpc": "2.0", "method": "ping", "id": "connection-test"},
+                json=init_request,
                 headers=self.headers,
                 timeout=self.timeout
             )
             response.raise_for_status()
+            
+            # Extract session ID from response
+            response_json = response.json()
+            self.session_id = self._extract_session_id(response, response_json)
+            if self.session_id:
+                self.headers["Mcp-Session-Id"] = self.session_id
+            
+            # Send initialized notification
+            init_notification = {
+                "jsonrpc": "2.0",
+                "method": "initialized",
+                "params": {}
+            }
+            self.send_notification(init_notification)
             
             # Start background task to poll for notifications
             self._should_stop = False
@@ -148,6 +176,19 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 self._notification_task.cancel()
                 self._notification_task = None
             
+            # If we have a session ID, try to end the session
+            if self.session_id:
+                try:
+                    self.logger.debug(f"Ending session {self.session_id}")
+                    self.session.delete(
+                        self.server_url,
+                        headers={"Mcp-Session-Id": self.session_id},
+                        timeout=self.timeout
+                    )
+                except:
+                    pass  # Ignore errors during session cleanup
+                self.session_id = None
+            
             # Close the session
             self.logger.debug("Closing HTTP session")
             self.session.close()
@@ -172,35 +213,44 @@ class HttpTransportAdapter(MCPTransportAdapter):
     
     async def _poll_notifications(self) -> None:
         """
-        Poll for notifications using POST requests.
+        Poll for notifications using SSE.
         """
         while not self._should_stop:
             try:
-                # Send a POST request to check for notifications
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self.session.post(
-                        self.server_url,
-                        json={"jsonrpc": "2.0", "method": "notifications/poll", "id": "poll"},
-                        headers=self.headers,
-                        timeout=self.timeout
-                    )
+                # Add session ID and SSE headers
+                headers = {
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache"
+                }
+                if self.session_id:
+                    headers["Mcp-Session-Id"] = self.session_id
+                
+                # Create SSE client
+                response = self.session.get(
+                    self.server_url,
+                    headers=headers,
+                    stream=True,
+                    timeout=self.timeout
                 )
                 response.raise_for_status()
                 
-                # Parse response
-                data = response.json()
-                if "result" in data and isinstance(data["result"], list):
-                    for notification in data["result"]:
-                        await self.notification_queue.put(notification)
+                client = sseclient.SSEClient(response)
                 
-                # Wait before next poll
-                await asyncio.sleep(1.0)  # Poll every second
-                
+                # Process events
+                for event in client.events():
+                    if self._should_stop:
+                        break
+                        
+                    try:
+                        data = json.loads(event.data)
+                        await self.notification_queue.put(data)
+                    except json.JSONDecodeError:
+                        self.logger.warning(f"Invalid JSON in SSE event: {event.data}")
+                    
             except Exception as e:
                 if not self._should_stop:
-                    self.logger.warning(f"Error polling for notifications: {str(e)}")
-                    await asyncio.sleep(5.0)  # Wait longer after error
+                    self.logger.warning(f"Error in SSE connection: {str(e)}")
+                    await asyncio.sleep(5.0)  # Wait before reconnecting
     
     async def get_next_notification(self) -> Optional[Dict[str, Any]]:
         """
@@ -229,6 +279,32 @@ class HttpTransportAdapter(MCPTransportAdapter):
             self.logger.error(f"Failed to get next notification: {str(e)}")
             return None
     
+    def get_session_id(self) -> Optional[str]:
+        """Get the current session ID."""
+        return self.session_id
+
+    def _extract_session_id(self, response: requests.Response, response_json: Dict[str, Any]) -> Optional[str]:
+        """Extract session ID from response headers or body."""
+        # First try headers (case-insensitive)
+        for header in response.headers:
+            if header.lower() == "mcp-session-id":
+                return response.headers[header]
+        
+        # Then try response body
+        if isinstance(response_json, dict):
+            if "result" in response_json:
+                result = response_json["result"]
+                if isinstance(result, dict):
+                    # Try direct sessionId field
+                    if "sessionId" in result:
+                        return result["sessionId"]
+                    # Try nested session object
+                    if "session" in result and isinstance(result["session"], dict):
+                        if "id" in result["session"]:
+                            return result["session"]["id"]
+        
+        return None
+
     def send_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Send a JSON-RPC request and wait for a response.
@@ -249,11 +325,18 @@ class HttpTransportAdapter(MCPTransportAdapter):
             if self.debug:
                 self.logger.debug(f"Sending request: {json.dumps(request)}")
             
+            # Add session ID header if we have one and this isn't an initialize request
+            headers = self.headers.copy()
+            if self.session_id and request.get("method") != "initialize":
+                headers["Mcp-Session-Id"] = self.session_id
+                if self.debug:
+                    self.logger.debug(f"Adding session ID to request: {self.session_id}")
+            
             # Send the HTTP request
             response = self.session.post(
                 self.server_url,
-                json=request,  # Use json parameter for automatic serialization
-                headers=self.headers,
+                json=request,
+                headers=headers,
                 timeout=self.timeout
             )
             
@@ -262,6 +345,14 @@ class HttpTransportAdapter(MCPTransportAdapter):
             
             # Parse the response
             response_json = response.json()
+            
+            # Check for session ID in initialize response
+            if request.get("method") == "initialize":
+                session_id = self._extract_session_id(response, response_json)
+                if session_id:
+                    self.session_id = session_id
+                    if self.debug:
+                        self.logger.debug(f"Captured session ID: {session_id}")
             
             if self.debug:
                 self.logger.debug(f"Received response: {json.dumps(response_json)}")
@@ -292,11 +383,16 @@ class HttpTransportAdapter(MCPTransportAdapter):
             if self.debug:
                 self.logger.debug(f"Sending notification: {json.dumps(notification)}")
             
+            # Add session ID header if we have one
+            headers = self.headers.copy()
+            if self.session_id:
+                headers["Mcp-Session-Id"] = self.session_id
+            
             # Send the HTTP request (no response expected)
             response = self.session.post(
                 self.server_url,
-                json=notification,  # Use json parameter for automatic serialization
-                headers=self.headers,
+                json=notification,
+                headers=headers,
                 timeout=self.timeout
             )
             
@@ -328,11 +424,16 @@ class HttpTransportAdapter(MCPTransportAdapter):
             if self.debug:
                 self.logger.debug(f"Sending batch request: {json.dumps(requests)}")
             
+            # Add session ID header if we have one
+            headers = self.headers.copy()
+            if self.session_id:
+                headers["Mcp-Session-Id"] = self.session_id
+            
             # Send the HTTP request
             response = self.session.post(
                 self.server_url,
-                json=requests,  # Use json parameter for automatic serialization
-                headers=self.headers,
+                json=requests,
+                headers=headers,
                 timeout=self.timeout
             )
             

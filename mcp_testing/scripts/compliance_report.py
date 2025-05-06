@@ -37,6 +37,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import List, Callable, Dict, Any
 
 # Add the parent directory to the Python path
 parent_dir = Path(__file__).resolve().parent.parent.parent
@@ -92,143 +93,154 @@ def log_with_timestamp(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}")
 
+def is_http_url(server_command: str) -> bool:
+    """Check if the server command is an HTTP URL."""
+    return server_command.startswith("http://") or server_command.startswith("https://")
+
 # Create a custom test runner that adds additional logging
 class VerboseTestRunner:
-    """A custom test runner that provides more detailed progress logs."""
+    """A test runner that provides verbose output during test execution."""
     
-    def __init__(self, debug=False):
+    def __init__(self, debug: bool = False):
+        """Initialize the test runner."""
         self.debug = debug
-        self.start_time = time.time()
+    
+    async def run_tests(self, tests: List[Callable], protocol: str, server_command: str, 
+                       env_vars: Dict[str, str], transport: str = "stdio", debug: bool = False, 
+                       timeout: float = 30.0) -> Dict[str, Any]:
+        """
+        Run a list of tests with verbose output.
         
-    async def run_test_with_progress(self, test_func, server_command, protocol_version, test_name, env_vars, 
-                                    current, total):
-        """Run a single test with progress reporting."""
-        test_start_time = time.time()
-        log_with_timestamp(f"Running test {current}/{total}: {test_name}")
-        
-        from mcp_testing.utils.runner import MCPTestRunner
-        runner = MCPTestRunner(debug=self.debug)
-        try:
-            result = await runner.run_test(test_func, server_command, protocol_version, test_name, env_vars)
-        except Exception as e:
-            # Handle exceptions that might occur during test execution
-            result = {
-                "name": test_name,
-                "passed": False,
-                "message": f"Test runner exception: {str(e)}",
-                "duration": time.time() - test_start_time
-            }
+        Args:
+            tests: List of test functions to run
+            protocol: Protocol version to test against
+            server_command: Command to start the server or URL for HTTP transport
+            env_vars: Environment variables to set
+            transport: Transport type ("stdio" or "http")
+            debug: Whether to enable debug output
+            timeout: Test timeout in seconds
             
-        test_end_time = time.time()
-        elapsed = test_end_time - test_start_time
-        
-        # Ensure result is a dictionary
-        if not isinstance(result, dict):
-            log_with_timestamp(f"Warning: Test {test_name} returned non-dictionary result: {result}")
-            result = {
-                "name": test_name,
-                "passed": False,
-                "message": f"Invalid test result: {str(result)}",
-                "duration": elapsed
-            }
-        
-        status = "PASSED" if result.get("passed", False) else "FAILED"
-        if result.get("skipped", False):
-            status = "SKIPPED"
-            
-        log_with_timestamp(f"Test {current}/{total}: {test_name} - {status} ({elapsed:.2f}s)")
-        
-        total_elapsed = test_end_time - self.start_time
-        remaining = total_elapsed / current * (total - current) if current > 0 else 0
-        log_with_timestamp(f"Progress: {current}/{total} tests completed, time elapsed: {total_elapsed:.1f}s, estimated remaining: {remaining:.1f}s")
-        
-        return result
-        
-    async def run_tests(self, tests, protocol, server_command, env_vars, timeout=None):
-        """Run a list of test cases with detailed progress reporting."""
-        test_results = []
-        total_tests = len(tests)
-        
-        log_with_timestamp(f"Starting test suite with {total_tests} tests")
-        self.start_time = time.time()
-        
-        for idx, (test_func, test_name) in enumerate(tests, 1):
-            result = await self.run_test_with_progress(
-                test_func, server_command, protocol, test_name, env_vars, idx, total_tests
-            )
-            test_results.append(result)
-            
-        total_time = time.time() - self.start_time
-        
-        # Count passed, failed, and skipped tests, handling non-dictionary results
+        Returns:
+            Dictionary containing test results
+        """
+        results = []
         passed = 0
+        failed = 0
         skipped = 0
-        for r in test_results:
-            if isinstance(r, dict):
-                if r.get("passed", False):
-                    if "skipped" in r.get("message", "").lower():
-                        skipped += 1
-                    else:
-                        passed += 1
-                if r.get("skipped", False):
+        timeouts = 0
+        
+        for test_item in tests:
+            # Handle test functions passed as tuples (func, name)
+            if isinstance(test_item, tuple):
+                test_func, test_name = test_item
+            else:
+                test_func = test_item
+                test_name = test_item.__name__
+            
+            start_time = time.time()
+            
+            try:
+                log_with_timestamp(f"Running test: {test_name}")
+                result = await asyncio.wait_for(
+                    test_func(protocol, server_command, env_vars, transport=transport, debug=debug),
+                    timeout=timeout
+                )
+                duration = time.time() - start_time
+                
+                if isinstance(result, dict) and result.get("skipped", False):
+                    log_with_timestamp(f"  ⚪ Skipped: {result.get('message', 'No message')}")
                     skipped += 1
+                    results.append({
+                        "name": test_name,
+                        "passed": True,
+                        "skipped": True,
+                        "duration": duration,
+                        "message": result.get("message", "")
+                    })
+                else:
+                    passed += 1
+                    log_with_timestamp(f"  ✅ Passed ({duration:.2f}s)")
+                    results.append({
+                        "name": test_name,
+                        "passed": True,
+                        "duration": duration,
+                        "message": str(result) if result else ""
+                    })
+                    
+            except asyncio.TimeoutError:
+                duration = time.time() - start_time
+                timeouts += 1
+                failed += 1
+                log_with_timestamp(f"  ❌ Timeout after {duration:.2f}s")
+                results.append({
+                    "name": test_name,
+                    "passed": False,
+                    "duration": duration,
+                    "message": f"Test timed out after {duration:.2f}s"
+                })
+                
+            except Exception as e:
+                duration = time.time() - start_time
+                failed += 1
+                log_with_timestamp(f"  ❌ Failed ({duration:.2f}s): {str(e)}")
+                if self.debug:
+                    import traceback
+                    traceback.print_exc()
+                results.append({
+                    "name": test_name,
+                    "passed": False,
+                    "duration": duration,
+                    "message": str(e)
+                })
         
-        failed = total_tests - passed - skipped
-        
-        log_with_timestamp(f"Test suite completed: {passed} passed, {failed} failed, {skipped} skipped, total time: {total_time:.2f}s")
-        
-        # Format the results exactly like the standard runner does
         return {
-            "results": test_results,
-            "total": total_tests,
+            "results": results,
+            "total": len(tests),
             "passed": passed,
             "failed": failed,
             "skipped": skipped,
-            "timeouts": 0 if timeout is None else 1
+            "timeouts": timeouts
         }
 
 async def main():
     """Run the compliance tests and generate a report."""
-    parser = argparse.ArgumentParser(description="Generate an MCP server compliance report")
-    
-    # Server configuration
-    parser.add_argument("--server-command", required=True, help="Command to start the server")
-    parser.add_argument("--protocol-version", choices=["2024-11-05", "2025-03-26"], 
-                        default="2025-03-26", help="Protocol version to use")
-    parser.add_argument("--server-config", help="JSON file with server-specific test configuration")
-    parser.add_argument("--args", help="Additional arguments to pass to the server command")
-    
-    # Output options
-    parser.add_argument("--output-dir", default="reports", help="Directory to store the report files")
-    parser.add_argument("--report-prefix", default="cr", help="Prefix for report filenames (default: 'cr')")
-    parser.add_argument("--json", action="store_true", help="Generate a JSON report")
-    
-    # Debug and control options
+    parser = argparse.ArgumentParser(description="Generate a compliance report for an MCP server.")
+    parser.add_argument("--server-command", required=True, help="Command to start the server or URL if using HTTP transport")
+    parser.add_argument("--protocol-version", required=True, help="Protocol version to test against")
+    parser.add_argument("--server-config", help="Path to server configuration file")
+    parser.add_argument("--args", help="Additional arguments to pass to the server")
+    parser.add_argument("--output-dir", default="reports", help="Directory to store reports")
+    parser.add_argument("--report-prefix", default="cr", help="Prefix for report filenames")
+    parser.add_argument("--json", action="store_true", help="Generate JSON report")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
-    parser.add_argument("--skip-async", action="store_true", help="Skip async tests")
-    parser.add_argument("--skip-shutdown", action="store_true", help="Skip shutdown/exit tests")
-    parser.add_argument("--required-tools", help="Comma-separated list of tools that should be required")
-    parser.add_argument("--skip-tests", help="Comma-separated list of test names to skip")
-    parser.add_argument("--dynamic-only", action="store_true", help="Only run dynamic tools tests")
-    parser.add_argument("--test-mode", choices=["all", "core", "tools", "async", "spec"], default="all", 
-                      help="Test mode: all, core, tools, async, or spec")
-    parser.add_argument("--spec-coverage-only", action="store_true", 
-                      help="Only run tests for spec coverage")
-    parser.add_argument("--auto-detect", action="store_true", 
-                      help="Auto-detect server type and apply appropriate configuration")
-    parser.add_argument("--test-timeout", type=int, default=30,
-                      help="Timeout in seconds for individual tests")
-    parser.add_argument("--tools-timeout", type=int, default=30,
-                      help="Timeout in seconds for tools tests (which often take more time)")
+    parser.add_argument("--skip-async", action="store_true", help="Skip async tool tests")
+    parser.add_argument("--skip-shutdown", action="store_true", help="Skip calling shutdown method")
+    parser.add_argument("--required-tools", help="Comma-separated list of required tools")
+    parser.add_argument("--skip-tests", help="Comma-separated list of tests to skip")
+    parser.add_argument("--dynamic-only", action="store_true", help="Only run dynamic tool tests")
+    parser.add_argument("--test-mode", choices=["all", "core", "tools"], default="all", help="Test mode")
+    parser.add_argument("--spec-coverage-only", action="store_true", help="Only run specification coverage tests")
+    parser.add_argument("--auto-detect", action="store_true", help="Auto-detect server configuration")
+    parser.add_argument("--test-timeout", type=int, default=30, help="Timeout for individual tests in seconds")
+    parser.add_argument("--tools-timeout", type=int, default=30, help="Timeout for tool tests in seconds")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
-    
+
     args = parser.parse_args()
+
+    # Determine if we're using HTTP transport
+    transport_type = "http" if is_http_url(args.server_command) else "stdio"
     
-    # Combine server command with any additional arguments
-    full_server_command = args.server_command
-    if args.args:
-        full_server_command = f"{args.server_command} {args.args}"
-    
+    # For HTTP transport, server_command is the URL
+    if transport_type == "http":
+        log_with_timestamp(f"Using HTTP transport with server URL: {args.server_command}")
+        full_server_command = args.server_command
+    else:
+        # For STDIO transport, build the full command with args
+        full_server_command = args.server_command
+        if args.args:
+            full_server_command = f"{full_server_command} {args.args}"
+        log_with_timestamp(f"Using STDIO transport with command: {full_server_command}")
+
     # Auto-detect protocol version if requested
     if args.auto_detect:
         recommended_version = get_recommended_protocol_version(full_server_command)
@@ -364,9 +376,11 @@ async def main():
             log_with_timestamp(f"Running {len(non_tool_tests)} non-tool tests with {test_timeout}s timeout")
             non_tool_results = await runner.run_tests(
                 non_tool_tests, 
-                args.protocol_version, 
-                full_server_command, 
-                env_vars,
+                protocol=args.protocol_version, 
+                transport=transport_type,  # Use detected transport type
+                server_command=full_server_command,
+                env_vars=env_vars,
+                debug=args.debug,
                 timeout=test_timeout
             )
         else:
@@ -377,23 +391,25 @@ async def main():
             log_with_timestamp(f"Running {len(tool_tests)} tool tests with {tools_timeout}s timeout")
             tool_results = await runner.run_tests(
                 tool_tests, 
-                args.protocol_version, 
-                full_server_command, 
-                env_vars,
+                protocol=args.protocol_version, 
+                transport=transport_type,  # Use detected transport type
+                server_command=full_server_command,
+                env_vars=env_vars,
+                debug=args.debug,
                 timeout=tools_timeout
             )
+            
+            # Combine results
+            results = {
+                "results": non_tool_results["results"] + tool_results["results"],
+                "total": non_tool_results["total"] + tool_results["total"],
+                "passed": non_tool_results["passed"] + tool_results["passed"],
+                "failed": non_tool_results["failed"] + tool_results["failed"],
+                "skipped": non_tool_results["skipped"] + tool_results["skipped"],
+                "timeouts": non_tool_results.get("timeouts", 0) + tool_results.get("timeouts", 0)
+            }
         else:
-            tool_results = {"results": [], "total": 0, "passed": 0, "failed": 0, "skipped": 0}
-        
-        # Combine results
-        results = {
-            "results": non_tool_results["results"] + tool_results["results"],
-            "total": non_tool_results["total"] + tool_results["total"],
-            "passed": non_tool_results["passed"] + tool_results["passed"],
-            "failed": non_tool_results["failed"] + tool_results["failed"],
-            "skipped": non_tool_results["skipped"] + tool_results["skipped"],
-            "timeouts": non_tool_results.get("timeouts", 0) + tool_results.get("timeouts", 0)
-        }
+            results = non_tool_results
     else:
         # Use the standard test runner
         from mcp_testing.utils.runner import MCPTestRunner
@@ -401,8 +417,8 @@ async def main():
         results = await run_tests(
             tests, 
             args.protocol_version, 
-            "stdio", 
-            full_server_command, 
+            transport_type,  # Use detected transport type
+            full_server_command,
             env_vars,
             debug=args.debug,
             timeout=tools_timeout  # Use the longer timeout for all tests in non-verbose mode

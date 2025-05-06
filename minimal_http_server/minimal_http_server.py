@@ -11,6 +11,7 @@ It supports both the 2024-11-05 and 2025-03-26 protocol versions.
 import argparse
 import json
 import logging
+import logging.handlers
 import os
 import signal
 import sys
@@ -21,6 +22,7 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, List, Optional, Union, Tuple
 import queue
 import socket
+import urllib.parse
 
 # Configure logging
 logging.basicConfig(
@@ -41,6 +43,11 @@ server_state = {
     "notifications": {}  # Track notifications for each session
 }
 
+# Add these constants at the top of the file after the imports
+RATE_LIMIT_WINDOW = 1.0  # Minimum time between polls in seconds
+MAX_CONNECTIONS_PER_SESSION = 5  # Maximum number of SSE connections per session
+CONNECTION_TIMEOUT = 60  # Connection timeout in seconds
+
 # Function to broadcast a message to all SSE connections
 def broadcast_sse_message(message: Dict[str, Any], event_type: str = "message"):
     """
@@ -58,14 +65,21 @@ def broadcast_sse_message(message: Dict[str, Any], event_type: str = "message"):
     sse_bytes = sse_data.encode('utf-8')
     
     # Send to all active connections
-    for conn in server_state["sse_connections"]:
+    for conn in server_state["sse_connections"][:]:  # Create copy to avoid modification during iteration
         try:
             conn["wfile"].write(sse_bytes)
             conn["wfile"].flush()
+            conn["last_active"] = time.time()
         except (BrokenPipeError, ConnectionResetError):
-            # Connection is dead, will be cleaned up by the GET handler
-            continue
-            
+            # Connection is dead, clean it up
+            try:
+                conn["connection"].close()
+            except:
+                pass
+            if conn in server_state["sse_connections"]:
+                server_state["sse_connections"].remove(conn)
+                logger.info(f"Removed dead connection: {conn['id']} for session: {conn['session_id']}")
+
 def send_sse_message_to_session(session_id: str, message: Dict[str, Any], event_type: str = "message"):
     """
     Send a message to all SSE connections for a specific session.
@@ -83,14 +97,21 @@ def send_sse_message_to_session(session_id: str, message: Dict[str, Any], event_
     sse_bytes = sse_data.encode('utf-8')
     
     # Send to all connections for this session
-    for conn in server_state["sse_connections"]:
+    for conn in server_state["sse_connections"][:]:  # Create copy to avoid modification during iteration
         if conn["session_id"] == session_id:
             try:
                 conn["wfile"].write(sse_bytes)
                 conn["wfile"].flush()
+                conn["last_active"] = time.time()
             except (BrokenPipeError, ConnectionResetError):
-                # Connection is dead, will be cleaned up by the GET handler
-                continue
+                # Connection is dead, clean it up
+                try:
+                    conn["connection"].close()
+                except:
+                    pass
+                if conn in server_state["sse_connections"]:
+                    server_state["sse_connections"].remove(conn)
+                    logger.info(f"Removed dead connection: {conn['id']} for session: {session_id}")
 
 # Supported protocol versions
 SUPPORTED_VERSIONS = ["2024-11-05", "2025-03-26"]
@@ -170,6 +191,10 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
     
     protocol_version = 'HTTP/1.1'
     server_version = 'MinimalHTTPMCPServer/1.0'
+    
+    def __init__(self, *args, **kwargs):
+        self.logger = logging.getLogger('MCPHTTPServer')
+        super().__init__(*args, **kwargs)
     
     def version_string(self):
         """Return server version string."""
@@ -255,36 +280,42 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
                 
     def do_POST(self):
         """Handle POST requests."""
-        # Only handle POST requests to /mcp path
-        if self.path != "/mcp":
-            self._send_error(404, "Not Found - MCP endpoint is at /mcp")
-            return
-            
+        self.logger.debug(f"Received POST request to {self.path}")
+        self.logger.debug(f"Headers: {self.headers}")
+        
         # Get content length
-        try:
-            content_length = int(self.headers.get('Content-Length', 0))
-        except ValueError:
-            self._send_error(400, "Bad Request: Invalid Content-Length header")
+        content_length = int(self.headers.get('Content-Length', 0))
+        if content_length == 0:
+            self.logger.error("No content received")
+            self._send_error(400, "No content received")
             return
             
         # Read request body
         try:
-            body = self.rfile.read(content_length)
+            body = self.rfile.read(content_length).decode('utf-8')
+            self.logger.debug(f"Request body: {body}")
             request = json.loads(body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            self._send_error(400, "Bad Request: Invalid JSON")
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON: {str(e)}")
+            self._send_error(400, f"Invalid JSON: {str(e)}")
+            return
+        except Exception as e:
+            self.logger.error(f"Error reading request: {str(e)}")
+            self._send_error(500, f"Error reading request: {str(e)}")
             return
             
         # Process request
         try:
-            response = self._process_request(request)
-            if response is not None:
-                session_id = None
-                if "result" in response and isinstance(response["result"], dict):
-                    session_id = response["result"].get("sessionId")
-                self._send_response(200, response, session_id)
+            response = self._handle_request(request)
+            self.logger.debug(f"Response: {response}")
+            
+            # Send response
+            self._send_response(response)
+            
         except Exception as e:
+            self.logger.error(f"Error processing request: {str(e)}")
             self._send_error(500, f"Internal server error: {str(e)}")
+            return
     
     def _send_response(self, status_code: int, response_data: Dict[str, Any], session_id: Optional[str] = None) -> None:
         """
@@ -319,78 +350,67 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
     
     def _send_sse_response(self, session_id: str) -> None:
-        """
-        Set up and send SSE response headers.
+        """Send Server-Sent Events response."""
+        # Verify session is valid
+        if not self._verify_session():
+            return
         
-        Args:
-            session_id: The session ID for this connection
-        """
-        # Send HTTP status line and headers
+        # Check connection limits
+        current_connections = count_session_connections(session_id)
+        if current_connections >= MAX_CONNECTIONS_PER_SESSION:
+            self._send_error(429, f"Too many connections for session (max {MAX_CONNECTIONS_PER_SESSION})")
+            return
+        
+        # Set up SSE response headers
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('Connection', 'keep-alive')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id')
+        self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
         
-        # Generate unique connection ID
-        connection_id = str(uuid.uuid4())
-        
-        # Store connection info for sending events
+        # Create connection record
+        conn_id = str(uuid.uuid4())
         connection_info = {
-            "id": connection_id,
+            "id": conn_id,
             "session_id": session_id,
-            "wfile": self.wfile,
-            "rfile": self.rfile,
+            "created": time.time(),
+            "last_active": time.time(),
             "connection": self.connection,
-            "last_active": time.time()
+            "wfile": self.wfile
         }
-        server_state["sse_connections"].append(connection_info)
         
         try:
-            # Send initial connection event
-            send_sse_message_to_session(
-                session_id,
-                {"connectionId": connection_id},
-                "connected"
-            )
+            # Add to active connections
+            server_state["sse_connections"].append(connection_info)
             
-            # Keep connection alive with periodic keep-alive messages
-            while True:
-                if server_state["shutdown_requested"]:
+            # Send initial keepalive
+            self.wfile.write(b": keepalive\n\n")
+            self.wfile.flush()
+            
+            # Keep connection alive
+            while not server_state["shutdown_requested"]:
+                # Check if connection is still valid
+                if time.time() - connection_info["last_active"] > CONNECTION_TIMEOUT:
+                    logger.info(f"Connection {conn_id} timed out")
                     break
-                if session_id not in server_state["sessions"]:
-                    break
-                    
-                # Send keep-alive comment
-                try:
-                    self.wfile.write(b": keep-alive\n\n")
-                    self.wfile.flush()
-                    connection_info["last_active"] = time.time()
-                except (BrokenPipeError, ConnectionResetError):
-                    break
-                    
-                # Process any pending notifications
-                notifications = server_state["notifications"].get(session_id, [])
-                if notifications:
-                    for notification in notifications:
-                        send_sse_message_to_session(
-                            session_id,
-                            notification,
-                            "notification"
-                        )
-                    server_state["notifications"][session_id] = []
                 
-                time.sleep(1)
+                # Send keepalive every 30 seconds
+                time.sleep(30)
+                self.wfile.write(b": keepalive\n\n")
+                self.wfile.flush()
+                connection_info["last_active"] = time.time()
                 
         except (BrokenPipeError, ConnectionResetError):
-            logger.debug("SSE connection closed by client")
+            logger.info(f"Client disconnected: {conn_id}")
         finally:
             # Clean up connection
             if connection_info in server_state["sse_connections"]:
                 server_state["sse_connections"].remove(connection_info)
-            logger.info(f"SSE connection closed: {connection_id} for session: {session_id}")
+            try:
+                self.connection.close()
+            except:
+                pass
     
     def _send_error(self, status_code: int, message: str) -> None:
         """
@@ -427,17 +447,50 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
     
     def _get_session_id(self) -> Optional[str]:
-        """Get the session ID from headers."""
-        return self.headers.get('Mcp-Session-Id')
-    
+        """Get session ID from headers or query parameters."""
+        # Check headers first (case-insensitive)
+        for header, value in self.headers.items():
+            if header.lower() == 'mcp-session-id':
+                return value
+        
+        # Check query parameters if no header found
+        path = self.path.split('?')
+        if len(path) > 1:
+            params = urllib.parse.parse_qs(path[1])
+            if 'session' in params:
+                return params['session'][0]
+        
+        return None
+
     def _verify_session(self) -> bool:
-        """Verify that the session exists and is valid."""
+        """Verify that the session is valid and active."""
         session_id = self._get_session_id()
-        return session_id is not None and session_id in server_state["sessions"]
+        if not session_id:
+            self._send_error(401, "No session ID provided")
+            return False
+        
+        if session_id not in server_state["sessions"]:
+            self._send_error(401, "Invalid session ID")
+            return False
+        
+        # Update session last activity time
+        server_state["sessions"][session_id]["last_active"] = time.time()
+        return True
+
+    def _create_session(self) -> str:
+        """Create a new session and return its ID."""
+        session_id = str(uuid.uuid4())
+        server_state["sessions"][session_id] = {
+            "created": time.time(),
+            "last_active": time.time(),
+            "initialized": False,
+            "protocol_version": None
+        }
+        return session_id
     
-    def _process_request(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _handle_request(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Process a JSON-RPC request and return a response.
+        Handle a JSON-RPC request and return a response.
         
         Args:
             request: The JSON-RPC request object
@@ -445,112 +498,68 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
         Returns:
             The JSON-RPC response object, or None for notifications
         """
+        self.logger.debug(f"Processing request: {request}")
+        
+        # Validate request format
+        if not isinstance(request, dict):
+            self.logger.error("Request must be a JSON object")
+            return self._create_error(-32600, "Request must be a JSON object")
+            
+        if "jsonrpc" not in request or request["jsonrpc"] != "2.0":
+            self.logger.error("Invalid JSON-RPC version")
+            return self._create_error(-32600, "Invalid JSON-RPC version")
+            
+        if "method" not in request:
+            self.logger.error("Method not specified")
+            return self._create_error(-32600, "Method not specified")
+            
+        # Handle initialization
+        if request["method"] == "initialize":
+            self.logger.info("Processing initialize request")
+            return self._handle_initialize(request)
+            
+        # Get session ID
+        session_id = self._get_session_id()
+        if not session_id:
+            self.logger.error("No session ID provided")
+            return self._create_error(401, "No session ID provided")
+            
+        # Verify session is valid
+        if not self._verify_session():
+            self.logger.error("Invalid session")
+            return self._create_error(401, "Invalid session")
+            
+        # Handle other methods
+        method = request["method"]
+        self.logger.debug(f"Handling method: {method}")
+        
         try:
-            # Validate JSON-RPC request format
-            if "jsonrpc" not in request or request["jsonrpc"] != "2.0":
-                raise JSONRPCError(-32600, "Invalid Request: jsonrpc field must be '2.0'")
-            
-            # Check if it's a notification (no id)
-            is_notification = "id" not in request
-            
-            # Get the method and params
-            if "method" not in request:
-                raise JSONRPCError(-32600, "Invalid Request: method field is required")
-            
-            method = request["method"]
-            params = request.get("params", {})
-            request_id = request.get("id")
-            
-            # For methods other than initialize and shutdown, verify session if required
-            if method not in ["initialize", "shutdown"] and server_state["initialized"]:
-                # If we have active sessions, require session ID
-                if server_state["sessions"] and not self._verify_session():
-                    raise JSONRPCError(-32000, "Invalid or missing session ID")
-            
-            # Process the method
-            result = self._handle_method(method, params)
-            
-            # Return the response (unless it's a notification)
-            if not is_notification:
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": result
-                }
+            if method == "server/info":
+                return self._handle_server_info(request)
+            elif method == "tools/list":
+                return self._handle_tools_list(request)
+            elif method == "tools/call":
+                return self._handle_tool_call(request)
+            elif method == "tools/call-async":
+                return self._handle_tools_call_async(request)
+            elif method == "tools/result":
+                return self._handle_tools_result(request)
+            elif method == "tools/cancel":
+                return self._handle_tools_cancel(request)
+            elif method == "resources/list":
+                return self._handle_resources_list(request)
+            elif method == "resources/get":
+                return self._handle_resources_get(request)
+            elif method == "notifications/send":
+                return self._handle_send_notification(request)
+            elif method == "notifications/poll":
+                return self._handle_notifications_poll(request)
             else:
-                return None
-                
-        except JSONRPCError as e:
-            # Return JSON-RPC error response (unless it's a notification)
-            if "id" in request:
-                error_data = {"code": e.code, "message": e.message}
-                if e.data:
-                    error_data["data"] = e.data
-                
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request["id"],
-                    "error": error_data
-                }
-            else:
-                return None
-    
-    def _handle_method(self, method: str, params: Dict[str, Any]) -> Any:
-        """Handle a JSON-RPC method call."""
-        # Check if we're initialized
-        if not server_state["initialized"] and method != "initialize":
-            raise JSONRPCError(-32002, "Server not initialized")
-
-        # Handle methods
-        if method == "initialize":
-            return self._handle_initialize(params)
-        elif method == "shutdown":
-            return self._handle_shutdown(params)
-        elif method == "server/info":
-            return self._handle_server_info(params)
-        elif method == "tools/list":
-            return self._handle_tools_list(params)
-        elif method == "tools/call":
-            return self._handle_tools_call(params)
-        elif method == "tools/call-async":
-            return self._handle_tools_call_async(params)
-        elif method == "tools/result":
-            return self._handle_tools_result(params)
-        elif method == "tools/cancel":
-            return self._handle_tools_cancel(params)
-        elif method == "resources/list":
-            return self._handle_resources_list(params)
-        elif method == "resources/get":
-            return self._handle_resources_get(params)
-        elif method == "notifications/send":
-            return self._handle_send_notification(params)
-        elif method == "notifications/poll":
-            return self._handle_notifications_poll(params)
-        else:
-            raise JSONRPCError(-32601, f"Method not found: {method}")
-    
-    def _handle_shutdown(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle the shutdown method.
-        
-        Args:
-            params: The method parameters
-            
-        Returns:
-            Empty result
-        """
-        # Reset server state
-        server_state["initialized"] = False
-        server_state["protocol_version"] = None
-        server_state["pending_async_calls"] = {}
-        server_state["resources"] = {}
-        server_state["sessions"] = {}
-        server_state["sse_connections"] = []
-        
-        # Signal shutdown
-        server_state["shutdown_requested"] = True
-        
-        return {}
+                self.logger.error(f"Unknown method: {method}")
+                return self._create_error(-32601, f"Method not found: {method}")
+        except Exception as e:
+            self.logger.error(f"Error handling method {method}: {str(e)}")
+            return self._create_error(-32603, f"Internal error: {str(e)}")
     
     def _handle_initialize(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -587,10 +596,8 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
         server_state["initialized"] = True
         
         # Create new session if none exists
-        session_id = self._get_session_id()
-        if not session_id:
-            session_id = str(uuid.uuid4())
-            self.send_header('Mcp-Session-Id', session_id)
+        session_id = self._create_session()
+        self.send_header('Mcp-Session-Id', session_id)
         
         # Store session info
         server_state["sessions"][session_id] = {
@@ -657,7 +664,7 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
         
         return {"tools": tools_list}
     
-    def _handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_tool_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle the tools/call method.
         
@@ -916,11 +923,17 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
         current_time = time.time()
         if "last_poll_time" in session:
             time_since_last_poll = current_time - session["last_poll_time"]
-            if time_since_last_poll < 1.0:  # Minimum 1 second between polls
-                raise JSONRPCError(-32000, "Rate limit exceeded - wait at least 1 second between polls")
+            if time_since_last_poll < RATE_LIMIT_WINDOW:
+                raise JSONRPCError(
+                    -32000, 
+                    f"Rate limit exceeded - wait at least {RATE_LIMIT_WINDOW} seconds between polls"
+                )
         
         # Update last poll time
         session["last_poll_time"] = current_time
+        
+        # Clean up any stale connections before processing notifications
+        cleanup_stale_connections()
         
         # Get and clear pending notifications for this session
         notifications = server_state["notifications"].get(session_id, [])
@@ -1030,33 +1043,82 @@ def run_server(host: str, port: int, debug: bool = False):
         logger.info("Server stopped")
 
 
+def setup_logging(debug: bool = False):
+    """Set up logging configuration."""
+    logger = logging.getLogger('MCPHTTPServer')
+    logger.setLevel(logging.DEBUG if debug else logging.INFO)
+    
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(console_handler)
+    
+    # File handler
+    file_handler = logging.handlers.RotatingFileHandler(
+        '/tmp/mcp_http_server.log',
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
+    )
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
+    
+    return logger
+
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Minimal HTTP MCP Server"
-    )
-    parser.add_argument(
-        "--host", 
-        default="localhost",
-        help="Host to bind to (default: localhost)"
-    )
-    parser.add_argument(
-        "--port", 
-        type=int, 
-        default=9000,
-        help="Port to bind to (default: 9000)"
-    )
-    parser.add_argument(
-        "--debug", 
-        action="store_true",
-        help="Enable debug logging"
-    )
-    
+    parser = argparse.ArgumentParser(description='MCP HTTP Server')
+    parser.add_argument('--port', type=int, default=9000, help='Port to listen on (default: 9000)')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
     
-    # Run the server
-    run_server(args.host, args.port, args.debug)
+    logger = setup_logging(args.debug)
+    logger.info(f"Starting MCP HTTP Server on port {args.port}")
+    
+    server = MCPHTTPServer(('', args.port), MCPHTTPRequestHandler)
+    server.serve_forever()
 
 
 if __name__ == "__main__":
-    main() 
+    main()
+
+def cleanup_stale_connections():
+    """Clean up stale SSE connections and sessions."""
+    current_time = time.time()
+    
+    # Clean up stale SSE connections
+    for conn in server_state["sse_connections"][:]:  # Create copy to avoid modification during iteration
+        if current_time - conn["last_active"] > CONNECTION_TIMEOUT:
+            logger.info(f"Removing stale connection: {conn['id']} for session: {conn['session_id']}")
+            try:
+                conn["connection"].close()
+            except:
+                pass
+            if conn in server_state["sse_connections"]:
+                server_state["sse_connections"].remove(conn)
+    
+    # Clean up stale sessions
+    for session_id in list(server_state["sessions"].keys()):
+        session = server_state["sessions"][session_id]
+        if current_time - session["last_active"] > (CONNECTION_TIMEOUT * 2):  # Give sessions longer timeout
+            logger.info(f"Removing stale session: {session_id}")
+            # Clean up any remaining connections for this session
+            for conn in server_state["sse_connections"][:]:
+                if conn["session_id"] == session_id:
+                    try:
+                        conn["connection"].close()
+                    except:
+                        pass
+                    if conn in server_state["sse_connections"]:
+                        server_state["sse_connections"].remove(conn)
+            # Remove session
+            del server_state["sessions"][session_id]
+            # Clean up notifications
+            if session_id in server_state["notifications"]:
+                del server_state["notifications"][session_id]
+
+def count_session_connections(session_id: str) -> int:
+    """Count active SSE connections for a session."""
+    # Clean up stale connections first
+    cleanup_stale_connections()
+    # Count remaining active connections
+    return sum(1 for conn in server_state["sse_connections"] if conn["session_id"] == session_id) 
