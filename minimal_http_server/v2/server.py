@@ -355,6 +355,15 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
         if method == "shutdown":
             logger.info("Received shutdown request")
             
+            # Check if shutdown is disabled (for testing)
+            if hasattr(self.server, 'no_shutdown') and self.server.no_shutdown:
+                logger.info("Ignoring shutdown request (no_shutdown is enabled)")
+                return {
+                    "jsonrpc": "2.0",
+                    "result": {"success": True},
+                    "id": request_id
+                }, {}
+            
             # Create a thread to shutdown the server after responding
             shutdown_thread = threading.Thread(target=lambda: (
                 time.sleep(1),  # Wait for response to be sent
@@ -771,7 +780,7 @@ def find_available_port(start_port: int, max_attempts: int = 10) -> int:
 
 def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, 
                debug: bool = False, auto_port: bool = False,
-               log_file: Optional[str] = None) -> None:
+               log_file: Optional[str] = None, no_shutdown: bool = False) -> None:
     """
     Run the MCP HTTP server.
     
@@ -781,6 +790,7 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
         debug: Whether to enable debug logging.
         auto_port: Whether to automatically find an available port.
         log_file: The log file to write to.
+        no_shutdown: If True, ignore shutdown requests (for testing).
     """
     # Set up logging
     setup_logging(debug, log_file)
@@ -798,6 +808,9 @@ def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
         # Create server
         server = MCPHTTPServer((host, port), MCPHTTPRequestHandler)
         server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        # Store no_shutdown option in server
+        server.no_shutdown = no_shutdown
         
         # Set up signal handlers for graceful shutdown
         def signal_handler(signum, frame):
@@ -839,10 +852,12 @@ def main():
                         help='Automatically find an available port if the specified port is in use')
     parser.add_argument('--log-file', type=str,
                         help='Log file to write to (in addition to stdout)')
+    parser.add_argument('--no-shutdown', action='store_true',
+                        help='Ignore shutdown requests (for testing with compliance tests)')
     
     args = parser.parse_args()
     
-    run_server(args.host, args.port, args.debug, args.auto_port, args.log_file)
+    run_server(args.host, args.port, args.debug, args.auto_port, args.log_file, args.no_shutdown)
 
 
 if __name__ == "__main__":

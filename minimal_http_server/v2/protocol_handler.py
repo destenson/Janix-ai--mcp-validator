@@ -385,16 +385,31 @@ class Protocol_2024_11_05(ProtocolHandler):
         tool_name = params["name"]
         
         # Check for arguments in both locations for compatibility with tests
-        # First try 'arguments' (correct for 2024-11-05)
-        # Then fall back to 'parameters' (for test compatibility)
-        arguments = params.get("arguments", {})
-        if not arguments and "parameters" in params:
-            arguments = params.get("parameters", {})
+        arguments = None
+        
+        # For 2024-11-05 spec, arguments should be in "arguments"
+        if "arguments" in params:
+            arguments = params["arguments"]
+        # Compliance tests might send "parameters" even for 2024-11-05
+        elif "parameters" in params:
+            arguments = params["parameters"]
+        # If nothing is provided, use empty dict
+        else:
+            arguments = {}
+            
+        logger.debug(f"Tool call: {tool_name} with arguments: {arguments}")
         
         # Execute the tool
-        result = self._execute_tool(tool_name, arguments)
-        
-        return result
+        try:
+            result = self._execute_tool(tool_name, arguments)
+            return result
+        except MCPError as e:
+            # Re-raise MCPError directly
+            raise e
+        except Exception as e:
+            # Wrap other exceptions
+            logger.error(f"Tool execution error: {str(e)}")
+            raise MCPError(-32603, f"Tool execution failed: {str(e)}")
 
 
 class Protocol_2025_03_26(ProtocolHandler):

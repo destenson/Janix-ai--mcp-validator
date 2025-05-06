@@ -32,11 +32,13 @@ def main():
                         help='Automatically find an available port if the specified port is in use')
     parser.add_argument('--log-file', type=str,
                         help='Log file to write to (in addition to stdout)')
+    parser.add_argument('--no-shutdown', action='store_true',
+                        help='Ignore shutdown requests (for testing with compliance tests)')
     
     args = parser.parse_args()
     
     # Run the server
-    run_server(args.host, args.port, args.debug, args.auto_port, args.log_file)
+    run_server(args.host, args.port, args.debug, args.auto_port, args.log_file, args.no_shutdown)
 
 
 if __name__ == "__main__":
