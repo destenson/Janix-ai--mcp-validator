@@ -55,6 +55,7 @@ from mcp_testing.tests.specification_coverage import TEST_CASES as SPEC_COVERAGE
 # Imports for adapters
 from mcp_testing.transports.stdio import StdioTransportAdapter
 from mcp_testing.transports.http import HttpTransportAdapter
+from mcp_testing.transports.fastmcp_http import FastMCPHttpAdapter
 from mcp_testing.protocols.v2024_11_05 import MCP2024_11_05Adapter
 from mcp_testing.protocols.v2025_03_26 import MCP2025_03_26Adapter
 from mcp_testing.protocols.base import MCPProtocolAdapter
@@ -108,9 +109,22 @@ def is_http_url(server_command: str) -> bool:
 class VerboseTestRunner:
     """A test runner that provides verbose output during test execution."""
     
-    def __init__(self, debug: bool = False):
-        """Initialize the test runner."""
+    def __init__(self, debug: bool = False, fastmcp: bool = False):
+        """Initialize the test runner.
+
+        Parameters
+        ----------
+        debug
+            Enable verbose logging from the transport + protocol layers.
+        fastmcp
+            When *True* the runner will instantiate the ``FastMCPHttpAdapter``
+            instead of the regular ``HttpTransportAdapter`` for HTTP
+            transports.  This flag replaces the previous accidental reference
+            to the outer-scope ``args`` object which caused a ``NameError``
+            at runtime.
+        """
         self.debug = debug
+        self.fastmcp = fastmcp
     
     async def run_tests(self, tests: List[Callable], protocol: str, server_command: str, 
                        env_vars: Dict[str, str], transport: str = "stdio", debug: bool = False, 
@@ -179,10 +193,16 @@ class VerboseTestRunner:
                         debug=self.debug
                     )
                 elif transport == "http":
-                    transport_adapter = HttpTransportAdapter(
-                        server_url=server_command, # server_command is URL for http
-                        debug=self.debug
-                    )
+                    if self.fastmcp:
+                        transport_adapter = FastMCPHttpAdapter(
+                            server_url=server_command,
+                            debug=self.debug
+                        )
+                    else:
+                        transport_adapter = HttpTransportAdapter(
+                            server_url=server_command,
+                            debug=self.debug
+                        )
                 else:
                     raise ValueError(f"Unsupported transport type: {transport}")
                 
@@ -315,6 +335,7 @@ async def main():
     parser.add_argument("--test-timeout", type=int, default=30, help="Timeout for individual tests in seconds")
     parser.add_argument("--tools-timeout", type=int, default=30, help="Timeout for tool tests in seconds")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument("--fastmcp", action="store_true", help="Use FastMCP-specific HTTP/SSE adapter")
 
     args = parser.parse_args()
 
@@ -456,7 +477,7 @@ async def main():
     
     if args.verbose or True:  # Always use verbose logging
         # Use our custom verbose test runner
-        runner = VerboseTestRunner(debug=args.debug)
+        runner = VerboseTestRunner(debug=args.debug, fastmcp=args.fastmcp)
         
         # Group tests by type and run with appropriate timeouts
         tool_tests = [(func, name) for func, name in tests if name.startswith("test_tool_") or name.startswith("test_tools_")]

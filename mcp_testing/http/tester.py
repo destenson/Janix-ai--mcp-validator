@@ -101,10 +101,14 @@ class MCPHttpTester:
         # Set up headers
         request_headers = {}
         
-        # Add session ID if we have one and this isn't an initialize request
-        if self.session_id and method != "initialize":
-            request_headers["Mcp-Session-Id"] = self.session_id
-            self.log(f"Adding session ID to request: {self.session_id}")
+        # Always include a session ID, either the existing one or a new one
+        if not self.session_id:
+            self.session_id = str(uuid.uuid4())
+            self.log(f"Created new session ID: {self.session_id}")
+        
+        # Add session ID to headers
+        request_headers["Mcp-Session-Id"] = self.session_id
+        self.log(f"Using session ID in request: {self.session_id}")
         
         # Add any additional headers
         if headers:

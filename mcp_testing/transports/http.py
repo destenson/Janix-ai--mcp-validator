@@ -96,13 +96,17 @@ class HttpTransportAdapter(MCPTransportAdapter):
         self.logger = logging.getLogger("HttpTransportAdapter")
         self._notification_task = None
         self._should_stop = False
-        self.session_id = None
+        
+        # Generate a session ID immediately and include it in headers to avoid 400 errors
+        self.session_id = str(uuid.uuid4())
+        self.headers["Mcp-Session-Id"] = self.session_id
         
         if debug:
             self.logger.setLevel(logging.DEBUG)
             handler = logging.StreamHandler()
             handler.setFormatter(logging.Formatter('%(name)s - %(levelname)s - %(message)s'))
             self.logger.addHandler(handler)
+            self.logger.debug(f"Created adapter with session ID: {self.session_id}")
     
     def _create_session(self) -> requests.Session:
         """Create and configure a requests Session."""
@@ -433,10 +437,14 @@ class HttpTransportAdapter(MCPTransportAdapter):
         if params is not None:
             request["params"] = params
             
-        # Add session ID if we have one
+        # Always ensure we have a session ID
+        if not self.session_id:
+            self.session_id = str(uuid.uuid4())
+            self.logger.debug(f"Created new session ID: {self.session_id}")
+            
+        # Add session ID to headers
         headers = self.headers.copy()
-        if self.session_id:
-            headers["Mcp-Session-Id"] = self.session_id
+        headers["Mcp-Session-Id"] = self.session_id
             
         self.logger.debug(f"Sending request: {request}")
         self.logger.debug(f"Headers: {headers}")
@@ -524,10 +532,14 @@ class HttpTransportAdapter(MCPTransportAdapter):
             if self.debug:
                 self.logger.debug(f"Sending notification: {json.dumps(notification)}")
             
-            # Add session ID header if we have one
+            # Always ensure we have a session ID
+            if not self.session_id:
+                self.session_id = str(uuid.uuid4())
+                self.logger.debug(f"Created new session ID for notification: {self.session_id}")
+            
+            # Add session ID header
             headers = self.headers.copy()
-            if self.session_id:
-                headers["Mcp-Session-Id"] = self.session_id
+            headers["Mcp-Session-Id"] = self.session_id
             
             # Send the HTTP request (no response expected)
             response = self.session.post(
@@ -565,10 +577,14 @@ class HttpTransportAdapter(MCPTransportAdapter):
             if self.debug:
                 self.logger.debug(f"Sending batch request: {json.dumps(requests)}")
             
-            # Add session ID header if we have one
+            # Always ensure we have a session ID
+            if not self.session_id:
+                self.session_id = str(uuid.uuid4())
+                self.logger.debug(f"Created new session ID for batch: {self.session_id}")
+            
+            # Add session ID header
             headers = self.headers.copy()
-            if self.session_id:
-                headers["Mcp-Session-Id"] = self.session_id
+            headers["Mcp-Session-Id"] = self.session_id
             
             # Send the HTTP request
             response = self.session.post(

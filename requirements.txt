@@ -11,4 +11,5 @@ pydantic>=2.3.0
 sseclient-py==1.7.2
 aiohttp>=3.11.0
 pytest-asyncio>=0.23.0
-pytest-aiohttp>=1.0.0 
+pytest-aiohttp>=1.0.0
+mcp[cli]>=1.7.1  # Python SDK for Model Context Protocol with CLI support 
