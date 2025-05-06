@@ -222,8 +222,14 @@ python -m mcp_testing.scripts.http_test --server-url http://example.com/mcp --de
 #### Generating Compliance Reports
 
 ```bash
-# STDIO server report
+# STDIO server report (minimal_mcp_server example)
 python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26 --output-dir "./reports"
+
+# STDIO server report (ref_stdio_server 2024-11-05 example)
+python -m mcp_testing.scripts.compliance_report --server-command "./ref_stdio_server/stdio_server_2024_11_05.py" --protocol-version 2024-11-05 --output-dir "./reports"
+
+# STDIO server report (ref_stdio_server 2025-03-26 example)
+python -m mcp_testing.scripts.compliance_report --server-command "./ref_stdio_server/stdio_server_2025_03_26.py" --protocol-version 2025-03-26 --output-dir "./reports"
 
 # HTTP server report
 python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26 --output-dir "./reports"
@@ -265,8 +271,6 @@ pytest mcp_testing/tests/base_protocol/
 ```
 
 ---
-
-
 
 ## License
 

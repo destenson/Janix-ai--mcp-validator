@@ -62,9 +62,13 @@ async def main():
     
     # Print results
     print(f"\nTest Results:")
-    print(f"Total tests: {results['total']}")
-    print(f"Passed: {results['passed']}")
-    print(f"Failed: {results['failed']}")
+    passed_count = results.get('passed', 0)
+    failed_count = results.get('failed', 0)
+    # Add other categories like 'skipped' or 'errored' if they exist and should be counted
+    total_tests = passed_count + failed_count 
+    print(f"Total tests: {total_tests}")
+    print(f"Passed: {passed_count}")
+    print(f"Failed: {failed_count}")
     
     # Write results to file if requested
     if args.output_file:

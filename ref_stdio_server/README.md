@@ -71,6 +71,20 @@ For 2025-03-26:
 python -m mcp_testing.scripts.run_stdio_tests --server-command "./ref_stdio_server/stdio_server_2025_03_26.py" --protocol-version 2025-03-26 --debug
 ```
 
+### Generating Full Compliance Reports
+
+For more comprehensive compliance reports, which include specification coverage and detailed results, use the `compliance_report.py` script. These reports are saved in Markdown format.
+
+For 2024-11-05:
+```bash
+python -m mcp_testing.scripts.compliance_report --server-command "./ref_stdio_server/stdio_server_2024_11_05.py" --protocol-version 2024-11-05 --output-dir "./reports"
+```
+
+For 2025-03-26:
+```bash
+python -m mcp_testing.scripts.compliance_report --server-command "./ref_stdio_server/stdio_server_2025_03_26.py" --protocol-version 2025-03-26 --output-dir "./reports"
+```
+
 ## Protocol Support Matrix
 
 | Feature | 2024-11-05 | 2025-03-26 |

@@ -52,6 +52,13 @@ from mcp_testing.tests.features.dynamic_tool_tester import TEST_CASES as DYNAMIC
 from mcp_testing.tests.features.dynamic_async_tools import TEST_CASES as DYNAMIC_ASYNC_TEST_CASES
 from mcp_testing.tests.specification_coverage import TEST_CASES as SPEC_COVERAGE_TEST_CASES
 
+# Imports for adapters
+from mcp_testing.transports.stdio import StdioTransportAdapter
+from mcp_testing.transports.http import HttpTransportAdapter
+from mcp_testing.protocols.v2024_11_05 import MCP2024_11_05Adapter
+from mcp_testing.protocols.v2025_03_26 import MCP2025_03_26Adapter
+from mcp_testing.protocols.base import MCPProtocolAdapter
+
 # Import server compatibility utilities
 try:
     from mcp_testing.utils.server_compatibility import (
@@ -129,6 +136,10 @@ class VerboseTestRunner:
         skipped = 0
         timeouts = 0
         
+        # Determine if shutdown should be globally skipped (e.g., by env var used by is_shutdown_skipped)
+        # This can be overridden by server-specific config later if needed.
+        global_skip_shutdown = is_shutdown_skipped()
+
         for test_item in tests:
             # Handle test functions passed as tuples (func, name)
             if isinstance(test_item, tuple):
@@ -138,40 +149,99 @@ class VerboseTestRunner:
                 test_name = test_item.__name__
             
             start_time = time.time()
-            
+            transport_adapter = None # Ensure it's defined for finally block
+            protocol_adapter: MCPProtocolAdapter = None # Ensure it's defined for finally block
+
+            # Skip shutdown-related tests if shutdown is disabled globally or by server config
+            # This check is simplified here; server_config specific skip is handled by test_runner usually
+            if global_skip_shutdown and (test_name == "test_shutdown" or test_name == "test_exit_after_shutdown"):
+                if self.debug:
+                    log_with_timestamp(f"Skipping {test_name} because shutdown is disabled")
+                duration = time.time() - start_time
+                results.append({
+                    "name": test_name,
+                    "passed": True, # Mark as passed to avoid false failures
+                    "skipped": True,
+                    "duration": duration,
+                    "message": "Test skipped because shutdown is disabled"
+                })
+                skipped += 1
+                continue
+
             try:
                 log_with_timestamp(f"Running test: {test_name}")
-                result = await asyncio.wait_for(
-                    test_func(protocol, server_command, env_vars, transport=transport, debug=debug),
+
+                # 1. Create and start transport adapter
+                if transport == "stdio":
+                    transport_adapter = StdioTransportAdapter(
+                        server_command=server_command,
+                        env_vars=env_vars,
+                        debug=self.debug
+                    )
+                elif transport == "http":
+                    transport_adapter = HttpTransportAdapter(
+                        server_url=server_command, # server_command is URL for http
+                        debug=self.debug
+                    )
+                else:
+                    raise ValueError(f"Unsupported transport type: {transport}")
+                
+                if not transport_adapter.start():
+                    raise Exception("Failed to start transport adapter")
+
+                # 2. Create protocol adapter
+                if protocol == "2024-11-05":
+                    protocol_adapter = MCP2024_11_05Adapter(
+                        transport=transport_adapter,
+                        debug=self.debug
+                    )
+                elif protocol == "2025-03-26":
+                    protocol_adapter = MCP2025_03_26Adapter(
+                        transport=transport_adapter,
+                        debug=self.debug
+                    )
+                else:
+                    raise ValueError(f"Unsupported protocol version: {protocol}")
+
+                # 3. Initialize connection
+                if self.debug:
+                    log_with_timestamp(f"  Initializing server for {test_name}...")
+                await protocol_adapter.initialize()
+                if self.debug:
+                    log_with_timestamp(f"  Sending initialized notification for {test_name}...")
+                await protocol_adapter.send_initialized()
+
+                # 4. Run the actual test function with the protocol adapter
+                test_passed, message = await asyncio.wait_for(
+                    test_func(protocol_adapter),
                     timeout=timeout
                 )
                 duration = time.time() - start_time
                 
-                if isinstance(result, dict) and result.get("skipped", False):
-                    log_with_timestamp(f"  ⚪ Skipped: {result.get('message', 'No message')}")
-                    skipped += 1
+                if test_passed:
+                    passed += 1
+                    log_with_timestamp(f"  ✅ Passed ({duration:.2f}s): {message if message else ''}")
                     results.append({
                         "name": test_name,
                         "passed": True,
-                        "skipped": True,
                         "duration": duration,
-                        "message": result.get("message", "")
+                        "message": message if message else ""
                     })
                 else:
-                    passed += 1
-                    log_with_timestamp(f"  ✅ Passed ({duration:.2f}s)")
+                    failed += 1
+                    log_with_timestamp(f"  ❌ Failed ({duration:.2f}s): {message}")
                     results.append({
                         "name": test_name,
-                        "passed": True,
+                        "passed": False,
                         "duration": duration,
-                        "message": str(result) if result else ""
+                        "message": message
                     })
-                    
+
             except asyncio.TimeoutError:
                 duration = time.time() - start_time
                 timeouts += 1
                 failed += 1
-                log_with_timestamp(f"  ❌ Timeout after {duration:.2f}s")
+                log_with_timestamp(f"  ❌ Timeout after {duration:.2f}s for test {test_name}")
                 results.append({
                     "name": test_name,
                     "passed": False,
@@ -182,7 +252,7 @@ class VerboseTestRunner:
             except Exception as e:
                 duration = time.time() - start_time
                 failed += 1
-                log_with_timestamp(f"  ❌ Failed ({duration:.2f}s): {str(e)}")
+                log_with_timestamp(f"  ❌ Error during {test_name} ({duration:.2f}s): {str(e)}")
                 if self.debug:
                     import traceback
                     traceback.print_exc()
@@ -192,6 +262,27 @@ class VerboseTestRunner:
                     "duration": duration,
                     "message": str(e)
                 })
+            finally:
+                # 5. Shutdown sequence
+                if protocol_adapter:
+                    current_skip_shutdown = global_skip_shutdown
+                    # Potentially check server-specific config for skip_shutdown if available
+                    # For now, relies on global_skip_shutdown for simplicity in this runner
+
+                    if not current_skip_shutdown:
+                        try:
+                            if self.debug:
+                                log_with_timestamp(f"  Shutting down for {test_name}...")
+                            await protocol_adapter.shutdown()
+                            await protocol_adapter.exit()
+                        except Exception as e_shutdown:
+                            if self.debug:
+                                log_with_timestamp(f"  Error during shutdown for {test_name}: {str(e_shutdown)}")
+                    elif self.debug:
+                        log_with_timestamp(f"  Skipping shutdown for {test_name} as configured.")
+                
+                if transport_adapter:
+                    transport_adapter.stop()
         
         return {
             "results": results,
