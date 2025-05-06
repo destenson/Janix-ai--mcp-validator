@@ -1,5 +1,82 @@
 # MCP HTTP Server Implementation Status - May 6, 2025
 
+## Current State Analysis
+
+### Transport Layer Issues
+1. HTTP Transport Adapter (mcp_testing/transports/http.py):
+   - Connection reset errors during request handling
+   - Improper session management
+   - Non-standard error code handling
+   - Lack of proper HTTP status code mapping to JSON-RPC errors
+
+2. Reference Server Issues:
+   - Duplicate request processing in ThreadingHTTPServer
+   - Incorrect parameter extraction in initialization
+   - Inconsistent error response formatting
+   - Connection lifecycle management problems
+
+### Action Plan
+
+1. Phase 1: HTTP Transport Framework Improvements
+   - Separate transport concerns from protocol validation
+   - Implement proper HTTP status code handling
+   - Add robust session management
+   - Improve connection lifecycle handling
+   - Add HTTP-specific test cases for transport requirements
+
+2. Phase 2: Compliance Testing Framework Updates
+   - Make core tests transport-agnostic
+   - Add transport-specific validation layer
+   - Implement proper separation between transport and protocol testing
+   - Add HTTP-specific compliance checks
+
+3. Phase 3: Reference Server Refinement
+   - Fix request handler threading issues
+   - Improve error handling and status codes
+   - Implement proper connection lifecycle management
+   - Add comprehensive logging for debugging
+
+### Next Steps
+
+1. Immediate Actions:
+   - Update HTTP transport adapter to handle connection resets
+   - Fix session management in transport layer
+   - Add proper error code mapping
+   - Implement connection pooling
+
+2. Testing Strategy:
+   - Create HTTP transport specific test suite
+   - Add transport validation layer to compliance tests
+   - Test against multiple HTTP server implementations
+
+3. Documentation Updates:
+   - Document HTTP transport requirements
+   - Add HTTP-specific compliance guidelines
+   - Update server implementation guide
+
+## Progress Tracking
+
+### Completed
+- Identified root causes of HTTP transport issues
+- Documented connection handling problems
+- Created action plan for framework improvements
+
+### In Progress
+- HTTP transport adapter improvements
+- Connection lifecycle management
+- Error handling standardization
+
+### Pending
+- Transport-specific test suite
+- Multiple server implementation testing
+- Documentation updates
+
+## Notes
+- Focus on making the testing framework work with ANY compliant HTTP server
+- Separate transport concerns from protocol validation
+- Ensure proper error handling and status code mapping
+- Implement robust connection management
+
 ## Current State
 
 The HTTP server implementation has been significantly improved with robust session management, enhanced SSE support, and comprehensive testing capabilities.
@@ -70,27 +147,6 @@ The HTTP server implementation has been significantly improved with robust sessi
    - Notification batching for efficiency
    - Memory usage monitoring
    - Session cleanup optimization
-
-### Next Steps
-
-1. Testing Improvements
-   - Complete edge case test coverage
-   - Implement comprehensive stress testing
-   - Add long-running stability tests
-   - Add performance benchmarking
-
-2. Performance Optimization
-   - Implement connection pooling
-   - Add notification batching
-   - Optimize memory usage
-   - Add performance monitoring
-   - Improve cleanup efficiency
-
-3. Documentation
-   - Update session management documentation
-   - Document SSE behavior and limits
-   - Add performance tuning guide
-   - Update testing documentation
 
 ## Test Commands
 

@@ -17,6 +17,7 @@ import asyncio
 from typing import Dict, Any, List, Optional, Union
 from urllib.parse import urljoin
 import sseclient
+import uuid
 
 from mcp_testing.transports.base import MCPTransportAdapter
 
@@ -24,12 +25,34 @@ from mcp_testing.transports.base import MCPTransportAdapter
 class HttpTransportAdapter(MCPTransportAdapter):
     """Transport adapter for HTTP-based MCP servers."""
     
+    # JSON-RPC error codes to HTTP status codes mapping
+    ERROR_CODE_MAP = {
+        -32700: 400,  # Parse error
+        -32600: 400,  # Invalid Request
+        -32601: 404,  # Method not found
+        -32602: 400,  # Invalid params
+        -32603: 500,  # Internal error
+        -32001: 401,  # Authentication error
+        -32002: 409,  # Server already initialized
+    }
+    
+    # HTTP status codes to JSON-RPC error codes mapping
+    HTTP_CODE_MAP = {
+        400: -32600,  # Bad Request -> Invalid Request
+        401: -32001,  # Unauthorized -> Authentication error
+        404: -32601,  # Not Found -> Method not found
+        409: -32002,  # Conflict -> Server already initialized
+        500: -32603,  # Internal Server Error -> Internal error
+    }
+    
     def __init__(self, 
                  server_command: Optional[str] = None,
                  server_url: Optional[str] = None, 
                  headers: Optional[Dict[str, str]] = None,
                  debug: bool = False,
-                 timeout: float = 30.0):
+                 timeout: float = 30.0,
+                 max_retries: int = 3,
+                 retry_delay: float = 1.0):
         """
         Initialize the HTTP transport adapter.
         
@@ -42,6 +65,8 @@ class HttpTransportAdapter(MCPTransportAdapter):
             headers: HTTP headers to include in all requests
             debug: Whether to enable debug output
             timeout: Request timeout in seconds
+            max_retries: Number of retry attempts
+            retry_delay: Delay between retry attempts in seconds
             
         Note:
             Either server_command or server_url must be provided.
@@ -63,8 +88,10 @@ class HttpTransportAdapter(MCPTransportAdapter):
             "Accept": "application/json"
         }
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
         self.process = None
-        self.session = requests.Session()
+        self.session = self._create_session()
         self.notification_queue = asyncio.Queue()
         self.logger = logging.getLogger("HttpTransportAdapter")
         self._notification_task = None
@@ -76,6 +103,23 @@ class HttpTransportAdapter(MCPTransportAdapter):
             handler = logging.StreamHandler()
             handler.setFormatter(logging.Formatter('%(name)s - %(levelname)s - %(message)s'))
             self.logger.addHandler(handler)
+    
+    def _create_session(self) -> requests.Session:
+        """Create and configure a requests Session."""
+        session = requests.Session()
+        
+        # Configure retries
+        retry = requests.adapters.Retry(
+            total=self.max_retries,
+            backoff_factor=self.retry_delay,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["POST", "GET"]
+        )
+        adapter = requests.adapters.HTTPAdapter(max_retries=retry)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        return session
     
     def start(self) -> bool:
         """
@@ -149,7 +193,7 @@ class HttpTransportAdapter(MCPTransportAdapter):
             # Start background task to poll for notifications
             self._should_stop = False
             loop = asyncio.get_event_loop()
-            self._notification_task = loop.create_task(self._poll_notifications())
+            self._notification_task = loop.create_task(self._notification_listener())
             
             self.is_started = True
             return True
@@ -159,78 +203,66 @@ class HttpTransportAdapter(MCPTransportAdapter):
             self.stop()  # Clean up any resources
             return False
     
-    def stop(self) -> bool:
-        """
-        Stop the HTTP transport.
+    def stop(self) -> None:
+        """Stop the transport and clean up resources."""
+        self.logger.debug("Stopping HTTP transport")
         
-        Terminates the server subprocess if it was started by this adapter.
+        # Signal notification listener to stop
+        self._should_stop = True
         
-        Returns:
-            True if stopped successfully, False otherwise
-        """
-        try:
-            # Stop the notification polling task
-            self._should_stop = True
-            if self._notification_task:
-                self.logger.debug("Cancelling notification polling task")
-                self._notification_task.cancel()
+        # Wait for notification task to complete
+        if self._notification_task:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.run_until_complete(self._notification_task)
                 self._notification_task = None
-            
-            # If we have a session ID, try to end the session
-            if self.session_id:
-                try:
-                    self.logger.debug(f"Ending session {self.session_id}")
-                    self.session.delete(
-                        self.server_url,
-                        headers={"Mcp-Session-Id": self.session_id},
-                        timeout=self.timeout
-                    )
-                except:
-                    pass  # Ignore errors during session cleanup
-                self.session_id = None
-            
-            # Close the session
-            self.logger.debug("Closing HTTP session")
-            self.session.close()
-            
-            # Terminate the process if it was started by this adapter
-            if self.process:
-                self.logger.debug("Terminating server process")
+            except Exception as e:
+                self.logger.error(f"Error stopping notification task: {str(e)}")
+        
+        # Close session
+        if self.session:
+            try:
+                self.session.close()
+            except Exception as e:
+                self.logger.error(f"Error closing session: {str(e)}")
+        
+        # Stop server if we started it
+        if self.process:
+            try:
                 self.process.terminate()
-                try:
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.logger.warning("Server process did not terminate, forcing kill")
-                    self.process.kill()
+                self.process.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+            except Exception as e:
+                self.logger.error(f"Error stopping server process: {str(e)}")
+            finally:
                 self.process = None
-                
-            self.is_started = False
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to stop HTTP transport: {str(e)}")
-            return False
+        
+        self.is_started = False
+        self.session_id = None
+        self.logger.debug("HTTP transport stopped")
     
-    async def _poll_notifications(self) -> None:
-        """
-        Poll for notifications using SSE.
-        """
+    async def _notification_listener(self):
+        """Listen for SSE notifications from the server."""
+        if not self.server_url:
+            self.logger.error("No server URL configured")
+            return
+            
+        headers = self.headers.copy()
+        if self.session_id:
+            headers["Mcp-Session-Id"] = self.session_id
+            
+        self.logger.debug("Starting notification listener")
+        
         while not self._should_stop:
             try:
-                # Add session ID and SSE headers
-                headers = {
-                    "Accept": "text/event-stream",
-                    "Cache-Control": "no-cache"
-                }
-                if self.session_id:
-                    headers["Mcp-Session-Id"] = self.session_id
-                
                 # Create SSE client
                 response = self.session.get(
-                    self.server_url,
+                    urljoin(self.server_url, "notifications"),
                     headers=headers,
                     stream=True,
-                    timeout=self.timeout
+                    timeout=None  # Long polling
                 )
                 response.raise_for_status()
                 
@@ -242,15 +274,46 @@ class HttpTransportAdapter(MCPTransportAdapter):
                         break
                         
                     try:
-                        data = json.loads(event.data)
-                        await self.notification_queue.put(data)
-                    except json.JSONDecodeError:
-                        self.logger.warning(f"Invalid JSON in SSE event: {event.data}")
-                    
+                        # Parse notification
+                        notification = json.loads(event.data)
+                        
+                        # Validate notification format
+                        if not isinstance(notification, dict):
+                            self.logger.warning(f"Invalid notification format: {notification}")
+                            continue
+                            
+                        if "jsonrpc" not in notification or notification["jsonrpc"] != "2.0":
+                            self.logger.warning(f"Invalid JSON-RPC version in notification: {notification}")
+                            continue
+                            
+                        if "method" not in notification:
+                            self.logger.warning(f"Missing method in notification: {notification}")
+                            continue
+                            
+                        # Queue notification for processing
+                        await self.notification_queue.put(notification)
+                        
+                    except json.JSONDecodeError as e:
+                        self.logger.warning(f"Failed to parse notification: {str(e)}")
+                        continue
+                    except Exception as e:
+                        self.logger.error(f"Error processing notification: {str(e)}")
+                        continue
+                        
+            except requests.exceptions.ConnectionError as e:
+                if not self._should_stop:
+                    self.logger.warning(f"SSE connection error, reconnecting: {str(e)}")
+                    await asyncio.sleep(1)  # Wait before retry
+            except requests.exceptions.RequestException as e:
+                if not self._should_stop:
+                    self.logger.error(f"SSE request error: {str(e)}")
+                    await asyncio.sleep(5)  # Longer wait for request errors
             except Exception as e:
                 if not self._should_stop:
-                    self.logger.warning(f"Error in SSE connection: {str(e)}")
-                    await asyncio.sleep(5.0)  # Wait before reconnecting
+                    self.logger.error(f"Unexpected error in notification listener: {str(e)}")
+                    await asyncio.sleep(5)
+                    
+        self.logger.debug("Notification listener stopped")
     
     async def get_next_notification(self) -> Optional[Dict[str, Any]]:
         """
@@ -283,6 +346,56 @@ class HttpTransportAdapter(MCPTransportAdapter):
         """Get the current session ID."""
         return self.session_id
 
+    def _handle_response(self, response: requests.Response) -> Dict[str, Any]:
+        """Handle HTTP response and convert to JSON-RPC format."""
+        try:
+            # Try to parse JSON response
+            json_response = response.json()
+            
+            # If it's already a valid JSON-RPC response, return it
+            if isinstance(json_response, dict) and "jsonrpc" in json_response:
+                return json_response
+            
+            # Convert HTTP error to JSON-RPC error
+            if not response.ok:
+                error_code = self.HTTP_CODE_MAP.get(response.status_code, -32603)
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": error_code,
+                        "message": response.reason or "Unknown error",
+                        "data": json_response
+                    },
+                    "id": None
+                }
+            
+            # Wrap successful response
+            return {
+                "jsonrpc": "2.0",
+                "result": json_response,
+                "id": None
+            }
+            
+        except requests.exceptions.JSONDecodeError:
+            # Handle non-JSON responses
+            if not response.ok:
+                error_code = self.HTTP_CODE_MAP.get(response.status_code, -32603)
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": error_code,
+                        "message": response.reason or "Unknown error",
+                        "data": response.text
+                    },
+                    "id": None
+                }
+            
+            return {
+                "jsonrpc": "2.0",
+                "result": response.text,
+                "id": None
+            }
+    
     def _extract_session_id(self, response: requests.Response, response_json: Dict[str, Any]) -> Optional[str]:
         """Extract session ID from response headers or body."""
         # First try headers (case-insensitive)
@@ -292,47 +405,44 @@ class HttpTransportAdapter(MCPTransportAdapter):
         
         # Then try response body
         if isinstance(response_json, dict):
+            # Try result.session.id path
             if "result" in response_json:
                 result = response_json["result"]
                 if isinstance(result, dict):
-                    # Try direct sessionId field
-                    if "sessionId" in result:
-                        return result["sessionId"]
-                    # Try nested session object
                     if "session" in result and isinstance(result["session"], dict):
                         if "id" in result["session"]:
                             return result["session"]["id"]
+            
+            # Try direct sessionId field
+            if "sessionId" in response_json:
+                return response_json["sessionId"]
         
         return None
 
-    def send_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Send a JSON-RPC request and wait for a response.
-        
-        Args:
-            request: The JSON-RPC request object
-            
-        Returns:
-            The JSON-RPC response object
-            
-        Raises:
-            ConnectionError: If the transport is not started or the request fails
-        """
+    def send_request(self, method: str, params: Optional[Dict[str, Any]] = None, request_id: Optional[str] = None) -> Dict[str, Any]:
+        """Send a JSON-RPC request to the server."""
         if not self.is_started:
-            raise ConnectionError("Transport not started")
+            raise TransportError("Transport not started")
             
+        # Build request
+        request = {
+            "jsonrpc": "2.0",
+            "method": method,
+            "id": request_id or str(uuid.uuid4())
+        }
+        if params is not None:
+            request["params"] = params
+            
+        # Add session ID if we have one
+        headers = self.headers.copy()
+        if self.session_id:
+            headers["Mcp-Session-Id"] = self.session_id
+            
+        self.logger.debug(f"Sending request: {request}")
+        self.logger.debug(f"Headers: {headers}")
+        
         try:
-            if self.debug:
-                self.logger.debug(f"Sending request: {json.dumps(request)}")
-            
-            # Add session ID header if we have one and this isn't an initialize request
-            headers = self.headers.copy()
-            if self.session_id and request.get("method") != "initialize":
-                headers["Mcp-Session-Id"] = self.session_id
-                if self.debug:
-                    self.logger.debug(f"Adding session ID to request: {self.session_id}")
-            
-            # Send the HTTP request
+            # Send request with retry handling
             response = self.session.post(
                 self.server_url,
                 json=request,
@@ -340,31 +450,62 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 timeout=self.timeout
             )
             
-            # Check for HTTP errors
-            response.raise_for_status()
+            # Process response
+            json_response = self._handle_response(response)
             
-            # Parse the response
-            response_json = response.json()
-            
-            # Check for session ID in initialize response
-            if request.get("method") == "initialize":
-                session_id = self._extract_session_id(response, response_json)
+            # Extract session ID if this is an initialization response
+            if method == "initialize" and response.ok:
+                session_id = self._extract_session_id(response, json_response)
                 if session_id:
                     self.session_id = session_id
-                    if self.debug:
-                        self.logger.debug(f"Captured session ID: {session_id}")
+                    self.logger.debug(f"Extracted session ID: {session_id}")
             
-            if self.debug:
-                self.logger.debug(f"Received response: {json.dumps(response_json)}")
+            return json_response
             
-            return response_json
-            
-        except requests.RequestException as e:
-            raise ConnectionError(f"HTTP request failed: {str(e)}")
-        except json.JSONDecodeError as e:
-            raise ConnectionError(f"Invalid JSON response: {str(e)}")
+        except requests.exceptions.ConnectionError as e:
+            self.logger.error(f"Connection error: {str(e)}")
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32003,
+                    "message": "Connection error",
+                    "data": str(e)
+                },
+                "id": request.get("id")
+            }
+        except requests.exceptions.Timeout as e:
+            self.logger.error(f"Request timeout: {str(e)}")
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32004,
+                    "message": "Request timeout",
+                    "data": str(e)
+                },
+                "id": request.get("id")
+            }
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Request error: {str(e)}")
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": "Internal error",
+                    "data": str(e)
+                },
+                "id": request.get("id")
+            }
         except Exception as e:
-            raise ConnectionError(f"Failed to send request: {str(e)}")
+            self.logger.error(f"Unexpected error: {str(e)}")
+            return {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": "Internal error",
+                    "data": str(e)
+                },
+                "id": request.get("id")
+            }
     
     def send_notification(self, notification: Dict[str, Any]) -> None:
         """
