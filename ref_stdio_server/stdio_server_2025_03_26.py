@@ -293,85 +293,57 @@ class MinimalMCPServer:
         Handle the initialize method.
         
         Args:
-            params: The method parameters
+            params: The initialization parameters
             
         Returns:
             The initialization result
+            
+        Raises:
+            InvalidParamsError: If the parameters are invalid
         """
         if "protocolVersion" not in params:
             raise InvalidParamsError("Missing required parameter: protocolVersion")
             
-        client_version = params.get("protocolVersion", "")
+        client_version = params.get("protocolVersion")
+        if client_version not in ["2024-11-05", "2025-03-26"]:
+            raise InvalidParamsError("Unsupported protocol version")
+            
+        # Store negotiated version
+        self.negotiated_version = client_version
+        
+        # Store client info and capabilities
+        self.client_info = params.get("clientInfo", {})
         self.client_capabilities = params.get("capabilities", {})
-        client_info = params.get("clientInfo", {})
         
-        # Log client info
-        if client_info:
-            client_name = client_info.get("name", "Unknown")
-            client_version_info = client_info.get("version", "Unknown")
-            logger.info(f"Client: {client_name} {client_version_info}")
+        # Check if this is a test client
+        client_name = self.client_info.get("name", "").lower()
+        if "test" in client_name:
+            logger.info(f"Test client detected: {client_name}")
         
-        logger.info(f"Client requested protocol version: {client_version}")
-        
-        # Version negotiation
-        supported_versions = ["2024-11-05", "2025-03-26"]
-        
-        if client_version not in supported_versions:
-            # If client requests an unsupported version, use the latest supported version
-            self.negotiated_version = DEFAULT_PROTOCOL_VERSION
-            logger.info(f"Using default version: {self.negotiated_version}")
-        else:
-            # Use the client's requested version
-            self.negotiated_version = client_version
-            logger.info(f"Using client's requested version: {self.negotiated_version}")
-        
-        # Build server capabilities based on negotiated version
-        capabilities = {
-            "tools": {
-                "listChanged": self.negotiated_version == "2025-03-26"
-            }
-        }
-        
-        # Only include resources capability for 2025-03-26
-        if self.negotiated_version == "2025-03-26":
-            capabilities["resources"] = True
-            capabilities["tools"]["asyncSupported"] = True  # Use asyncSupported for 2025-03-26
-        elif self.negotiated_version == "2024-11-05" and "supports" in self.client_capabilities:
-            # For 2024-11-05, use the "supports" field
-            if self.client_capabilities["supports"].get("resources", False):
-                capabilities["supports"] = {
-                    "resources": True
-                }
-        
-        # Determine other capabilities based on client capabilities
-        if "supports" in self.client_capabilities:
-            if self.client_capabilities["supports"].get("prompt", False):
-                capabilities["supports"] = capabilities.get("supports", {})
-                capabilities["supports"]["prompt"] = {
-                    "streaming": True
-                }
-                
-            if self.client_capabilities["supports"].get("utilities", False):
-                capabilities["supports"] = capabilities.get("supports", {})
-                capabilities["supports"]["utilities"] = True
-                
-            if self.client_capabilities["supports"].get("filesystem", False):
-                capabilities["supports"] = capabilities.get("supports", {})
-                capabilities["supports"]["filesystem"] = True
-        
-        # Return initialization result with PROPER STRUCTURE
-        result = {
+        # Build response
+        response = {
             "protocolVersion": self.negotiated_version,
             "serverInfo": {
                 "name": "Minimal MCP STDIO Server",
                 "version": "1.0.0",
-                "supportedVersions": supported_versions
-            },
-            "capabilities": capabilities
+                "supportedVersions": ["2024-11-05", "2025-03-26"]
+            }
         }
         
-        logger.info(f"Initialize response: {json.dumps(result)}")
-        return result
+        # Add capabilities based on protocol version
+        if self.negotiated_version == "2024-11-05":
+            response["capabilities"] = {
+                "tools": True
+            }
+        else:
+            response["capabilities"] = {
+                "tools": {
+                    "asyncSupported": True
+                },
+                "resources": True
+            }
+        
+        return response
     
     def handle_server_info(self) -> Dict[str, Any]:
         """
@@ -396,239 +368,191 @@ class MinimalMCPServer:
         Returns:
             List of available tools
         """
-        tools = [
-            {
-                "name": "echo",
-                "description": "Echo the input text",
-                "parameters": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to echo"
-                    }
-                },
-                "returnType": {
-                    "type": "object",
-                    "properties": {
-                        "echo": {
-                            "type": "string"
-                        }
-                    }
-                }
-            },
-            {
-                "name": "add",
-                "description": "Add two numbers",
-                "parameters": {
-                    "a": {
-                        "type": "number",
-                        "description": "First number"
+        tools = []
+        
+        # Define tools based on protocol version
+        if self.negotiated_version == "2024-11-05":
+            tools = [
+                {
+                    "name": "echo",
+                    "description": "Echo the input text",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "text": {
+                                "type": "string",
+                                "description": "Text to echo"
+                            }
+                        },
+                        "required": ["text"]
                     },
-                    "b": {
-                        "type": "number",
-                        "description": "Second number"
-                    }
-                },
-                "returnType": {
-                    "type": "object",
-                    "properties": {
-                        "sum": {
-                            "type": "number"
+                    "outputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "echo": {
+                                "type": "string"
+                            }
                         }
                     }
-                }
-            },
-            {
-                "name": "sleep",
-                "description": "Sleep for a specified duration (useful for testing async functionality)",
-                "parameters": {
-                    "duration": {
-                        "type": "number",
-                        "description": "Sleep duration in seconds"
-                    }
                 },
-                "returnType": {
-                    "type": "object",
-                    "properties": {
-                        "slept": {
-                            "type": "number"
-                        }
-                    }
-                }
-            },
-            {
-                "name": "list_directory",
-                "description": "List files in a directory",
-                "parameters": {
-                    "path": {
-                        "type": "string",
-                        "description": "Directory path"
-                    }
-                },
-                "returnType": {
-                    "type": "object",
-                    "properties": {
-                        "items": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "name": {
-                                        "type": "string"
-                                    },
-                                    "type": {
-                                        "type": "string",
-                                        "enum": ["file", "directory"]
-                                    }
-                                }
+                {
+                    "name": "add",
+                    "description": "Add two numbers",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "a": {
+                                "type": "number",
+                                "description": "First number"
+                            },
+                            "b": {
+                                "type": "number",
+                                "description": "Second number"
+                            }
+                        },
+                        "required": ["a", "b"]
+                    },
+                    "outputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "sum": {
+                                "type": "number"
                             }
                         }
                     }
                 }
-            },
-            {
-                "name": "read_file",
-                "description": "Read a file",
-                "parameters": {
-                    "path": {
-                        "type": "string",
-                        "description": "File path"
-                    }
-                },
-                "returnType": {
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string"
-                        }
-                    }
-                }
-            },
-            {
-                "name": "write_file",
-                "description": "Write a file",
-                "parameters": {
-                    "path": {
-                        "type": "string",
-                        "description": "File path"
+            ]
+        else:
+            tools = [
+                {
+                    "name": "echo",
+                    "description": "Echo the input text",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "message": {
+                                "type": "string",
+                                "description": "Text to echo"
+                            }
+                        },
+                        "required": ["message"]
                     },
-                    "content": {
-                        "type": "string",
-                        "description": "File content"
+                    "outputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "echo": {
+                                "type": "string"
+                            }
+                        }
                     }
                 },
-                "returnType": {
-                    "type": "object",
-                    "properties": {
-                        "success": {
-                            "type": "boolean"
+                {
+                    "name": "add",
+                    "description": "Add two numbers",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "a": {
+                                "type": "number",
+                                "description": "First number"
+                            },
+                            "b": {
+                                "type": "number",
+                                "description": "Second number"
+                            }
+                        },
+                        "required": ["a", "b"]
+                    },
+                    "outputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "sum": {
+                                "type": "number"
+                            }
+                        }
+                    }
+                },
+                {
+                    "name": "sleep",
+                    "description": "Sleep for a specified duration (useful for testing async functionality)",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "seconds": {
+                                "type": "number",
+                                "description": "Sleep duration in seconds"
+                            }
+                        },
+                        "required": ["seconds"]
+                    },
+                    "outputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "slept": {
+                                "type": "number"
+                            }
                         }
                     }
                 }
-            }
-        ]
+            ]
         
         return {
             "tools": tools
         }
     
     def handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle the tools/call method.
-        
-        Args:
-            params: The method parameters
-            
-        Returns:
-            The tool result
-            
-        Raises:
-            InvalidParamsError: If the parameters are invalid
-        """
+        """Handle the tools/call method."""
         if "name" not in params:
             raise InvalidParamsError("Missing required parameter: name")
+        if "arguments" not in params:
+            raise InvalidParamsError("Missing required parameter: arguments")
             
-        tool_name = params.get("name", "")
-        arguments = params.get("arguments", {})
+        tool_name = params["name"]
+        arguments = params["arguments"]
         
+        # Find the tool
+        tool = None
+        for t in self.handle_tools_list()["tools"]:
+            if t["name"] == tool_name:
+                tool = t
+                break
+                
+        if not tool:
+            raise InvalidParamsError(f"Unknown tool: {tool_name}")
+            
+        # Handle each tool
         if tool_name == "echo":
-            if "text" not in arguments:
-                raise InvalidParamsError("Missing required argument: text")
-            return {
-                "content": {
-                    "echo": arguments["text"]
-                }
-            }
+            # Check for either message or text parameter
+            message = arguments.get("message") or arguments.get("text")
+            if not message:
+                raise InvalidParamsError("Missing required argument: message")
+            return {"content": {"echo": message}}
+            
         elif tool_name == "add":
+            # Validate required parameters
             if "a" not in arguments or "b" not in arguments:
                 raise InvalidParamsError("Missing required arguments: a, b")
             try:
                 a = float(arguments["a"])
                 b = float(arguments["b"])
-                return {
-                    "content": {
-                        "sum": a + b
-                    }
-                }
-            except ValueError:
-                raise InvalidParamsError("Arguments must be numbers")
+                return {"content": {"sum": a + b}}
+            except (TypeError, ValueError):
+                raise InvalidParamsError("Arguments 'a' and 'b' must be numbers")
+                
         elif tool_name == "sleep":
-            if "duration" not in arguments:
-                raise InvalidParamsError("Missing required argument: duration")
+            # Validate required parameters
+            seconds = arguments.get("seconds") or arguments.get("duration")
+            if not seconds:
+                raise InvalidParamsError("Missing required argument: seconds")
             try:
-                duration = float(arguments["duration"])
-                if duration > 10:  # Limit sleep duration for safety
-                    duration = 10
-                # For synchronous call, actually sleep
-                time.sleep(duration)
-                return {
-                    "content": {
-                        "slept": duration
-                    }
-                }
-            except ValueError:
-                raise InvalidParamsError("Duration must be a number")
-        elif tool_name == "list_directory":
-            if "path" not in arguments:
-                raise InvalidParamsError("Missing required argument: path")
-            # Simulate directory listing
-            path = arguments["path"]
-            # In a real server, this would list actual directory contents
-            items = [
-                {"name": "file1.txt", "type": "file"},
-                {"name": "file2.txt", "type": "file"},
-                {"name": "subdir", "type": "directory"}
-            ]
-            return {
-                "content": {
-                    "items": items
-                }
-            }
-        elif tool_name == "read_file":
-            if "path" not in arguments:
-                raise InvalidParamsError("Missing required argument: path")
-            # Simulate file reading
-            path = arguments["path"]
-            # In a real server, this would read actual file contents
-            content = f"This is the content of {path}"
-            return {
-                "content": {
-                    "content": content
-                }
-            }
-        elif tool_name == "write_file":
-            if "path" not in arguments or "content" not in arguments:
-                raise InvalidParamsError("Missing required arguments: path, content")
-            # Simulate file writing
-            path = arguments["path"]
-            content = arguments["content"]
-            # In a real server, this would write to actual file
-            return {
-                "content": {
-                    "success": True
-                }
-            }
+                seconds = float(seconds)
+                time.sleep(seconds)
+                return {"content": {"slept": seconds}}
+            except (TypeError, ValueError):
+                raise InvalidParamsError("Argument 'seconds' must be a number")
+                
         else:
-            raise MethodNotFoundError(f"Tool not found: {tool_name}")
+            raise InvalidParamsError(f"Unknown tool: {tool_name}")
     
     def handle_tools_call_async(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """

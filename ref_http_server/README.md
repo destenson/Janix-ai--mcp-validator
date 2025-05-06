@@ -1,6 +1,6 @@
-# Minimal HTTP MCP Server (v2)
+# Reference HTTP MCP Server (v2)
 
-This directory contains a minimal implementation of the MCP (Model Conversation Protocol) server that uses HTTP as its transport layer. This implementation supports both the 2024-11-05 and 2025-03-26 protocol versions.
+This directory contains a reference implementation of the MCP (Model Conversation Protocol) server that uses HTTP as its transport layer. This implementation supports both the 2024-11-05 and 2025-03-26 protocol versions.
 
 ## Features
 

@@ -10,7 +10,7 @@ This package provides a reference implementation of the MCP HTTP server.
 # Version of the package
 __version__ = "2.0.0"
 
-from minimal_http_server.server import (
+from ref_http_server.server import (
     run_server, main, MCPHTTPServer, MCPHTTPRequestHandler, 
     DEFAULT_HOST, DEFAULT_PORT, SUPPORTED_VERSIONS
 )

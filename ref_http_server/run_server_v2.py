@@ -16,7 +16,7 @@ parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
 sys.path.insert(0, parent_dir)
 
 # Import the server components
-from minimal_http_server.v2.server import run_server, DEFAULT_HOST, DEFAULT_PORT
+from ref_http_server.server import run_server, DEFAULT_HOST, DEFAULT_PORT
 import argparse
 
 def main():

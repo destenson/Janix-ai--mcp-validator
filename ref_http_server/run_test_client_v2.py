@@ -16,7 +16,7 @@ parent_dir = os.path.abspath(os.path.join(current_dir, '..'))
 sys.path.insert(0, parent_dir)
 
 # Import the test client components
-from minimal_http_server.test_client import main
+from ref_http_server.test_client import main
 
 if __name__ == "__main__":
     main() 
