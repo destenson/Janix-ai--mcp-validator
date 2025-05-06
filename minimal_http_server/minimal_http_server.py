@@ -11,6 +11,7 @@ It supports both the 2024-11-05 and 2025-03-26 protocol versions.
 import argparse
 import json
 import logging
+import logging.handlers
 import os
 import signal
 import sys
@@ -20,6 +21,9 @@ import uuid
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, List, Optional, Union, Tuple
 import queue
+import socket
+import urllib.parse
+import errno
 
 # Configure logging
 logging.basicConfig(
@@ -30,14 +34,83 @@ logger = logging.getLogger('MinimalHTTPMCPServer')
 
 # Server state
 server_state = {
-    "initialized": False,
-    "protocol_version": None,
     "pending_async_calls": {},
     "resources": {},
     "shutdown_requested": False,
     "sessions": {},  # Track active sessions
-    "sse_connections": []  # Track SSE connections
+    "sse_connections": [],  # Track SSE connections
+    "notifications": {}  # Track notifications for each session
 }
+
+# Add these constants at the top of the file after the imports
+RATE_LIMIT_WINDOW = 1.0  # Minimum time between polls in seconds
+MAX_CONNECTIONS_PER_SESSION = 5  # Maximum number of SSE connections per session
+CONNECTION_TIMEOUT = 60  # Connection timeout in seconds
+
+# Function to broadcast a message to all SSE connections
+def broadcast_sse_message(message: Dict[str, Any], event_type: str = "message"):
+    """
+    Broadcast a message to all SSE connections.
+    
+    Args:
+        message: The message to broadcast
+        event_type: The SSE event type
+    """
+    # Convert message to JSON
+    message_json = json.dumps(message)
+    
+    # Format as SSE event
+    sse_data = f"event: {event_type}\ndata: {message_json}\n\n"
+    sse_bytes = sse_data.encode('utf-8')
+    
+    # Send to all active connections
+    for conn in server_state["sse_connections"][:]:  # Create copy to avoid modification during iteration
+        try:
+            conn["wfile"].write(sse_bytes)
+            conn["wfile"].flush()
+            conn["last_active"] = time.time()
+        except (BrokenPipeError, ConnectionResetError):
+            # Connection is dead, clean it up
+            try:
+                conn["connection"].close()
+            except:
+                pass
+            if conn in server_state["sse_connections"]:
+                server_state["sse_connections"].remove(conn)
+                logger.info(f"Removed dead connection: {conn['id']} for session: {conn['session_id']}")
+
+def send_sse_message_to_session(session_id: str, message: Dict[str, Any], event_type: str = "message"):
+    """
+    Send a message to all SSE connections for a specific session.
+    
+    Args:
+        session_id: The target session ID
+        message: The message to send
+        event_type: The SSE event type
+    """
+    # Convert message to JSON
+    message_json = json.dumps(message)
+    
+    # Format as SSE event
+    sse_data = f"event: {event_type}\ndata: {message_json}\n\n"
+    sse_bytes = sse_data.encode('utf-8')
+    
+    # Send to all connections for this session
+    for conn in server_state["sse_connections"][:]:  # Create copy to avoid modification during iteration
+        if conn["session_id"] == session_id:
+            try:
+                conn["wfile"].write(sse_bytes)
+                conn["wfile"].flush()
+                conn["last_active"] = time.time()
+            except (BrokenPipeError, ConnectionResetError):
+                # Connection is dead, clean it up
+                try:
+                    conn["connection"].close()
+                except:
+                    pass
+                if conn in server_state["sse_connections"]:
+                    server_state["sse_connections"].remove(conn)
+                    logger.info(f"Removed dead connection: {conn['id']} for session: {session_id}")
 
 # Supported protocol versions
 SUPPORTED_VERSIONS = ["2024-11-05", "2025-03-26"]
@@ -116,6 +189,49 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
     """HTTP request handler for MCP protocol."""
     
     protocol_version = 'HTTP/1.1'
+    server_version = 'MinimalHTTPMCPServer/1.0'
+    
+    def __init__(self, *args, **kwargs):
+        self.logger = logging.getLogger('MCPHTTPServer')
+        try:
+            super().__init__(*args, **kwargs)
+        except ConnectionResetError:
+            self.logger.debug("Client disconnected during request handling")
+        except Exception as e:
+            self.logger.error(f"Error handling request: {str(e)}")
+    
+    def handle(self):
+        """Handle multiple requests if necessary."""
+        try:
+            super().handle()
+        except ConnectionResetError:
+            self.logger.debug("Client disconnected during request handling")
+        except Exception as e:
+            self.logger.error(f"Error in request handling: {str(e)}")
+    
+    def handle_one_request(self):
+        """Handle a single HTTP request."""
+        try:
+            super().handle_one_request()
+        except ConnectionResetError:
+            self.logger.debug("Client disconnected during request")
+        except Exception as e:
+            self.logger.error(f"Error in request: {str(e)}")
+            try:
+                self.send_error(500, f"Internal Server Error: {str(e)}")
+            except:
+                pass  # If we can't send the error, just log it
+    
+    def version_string(self):
+        """Return server version string."""
+        return self.server_version
+    
+    def send_response(self, code, message=None):
+        """Send the response header and log the response code."""
+        self.log_request(code)
+        self.send_response_only(code, message)
+        self.send_header('Server', self.version_string())
+        self.send_header('Date', self.date_time_string())
     
     def log_message(self, format, *args):
         """Override log_message to use our logger."""
@@ -129,10 +245,12 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
             return
             
         self.send_response(200)
-        self.send_header('Allow', 'OPTIONS, POST, GET, DELETE')
+        self.send_header('Allow', 'OPTIONS, POST, GET')
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, DELETE')
+        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id')
+        self.send_header('Access-Control-Max-Age', '86400')  # Cache preflight for 24 hours
+        self.send_header('Content-Length', '0')  # Important to avoid keep-alive issues
         self.end_headers()
     
     def do_DELETE(self):
@@ -145,13 +263,15 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
         # Check if this is a session termination request
         session_id = self.headers.get('Mcp-Session-Id')
         if session_id and session_id in server_state["sessions"]:
-            # Remove the session
+            # Remove session
             del server_state["sessions"][session_id]
-            logger.info(f"Session terminated: {session_id}")
-            self.send_response(204)  # No Content
-            self.end_headers()
+            if session_id in server_state["notifications"]:
+                del server_state["notifications"][session_id]
+            
+            # Send success response
+            self._send_response(200, {"success": True})
         else:
-            self._send_error(404, "Session not found")
+            self._send_error(401, "Unauthorized: Valid session ID required")
     
     def do_GET(self):
         """Handle GET requests for SSE streaming."""
@@ -160,425 +280,473 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
             self._send_error(404, "Not Found - MCP endpoint is at /mcp")
             return
         
-        # Any path is acceptable for the SSE endpoint
         # Check if client accepts SSE
         accept_header = self.headers.get('Accept', '')
         if 'text/event-stream' not in accept_header:
             self._send_error(406, "Not Acceptable: Client must accept text/event-stream")
             return
             
-        # Set up SSE response
+        # Get session ID and verify session
+        session_id = self.headers.get('Mcp-Session-Id')
+        if not session_id or session_id not in server_state["sessions"]:
+            self._send_error(401, "Unauthorized: Valid session ID required")
+            return
+            
+        # Initialize notifications queue for this session if it doesn't exist
+        if session_id not in server_state["notifications"]:
+            server_state["notifications"][session_id] = []
+            
+        # Start SSE stream
+        try:
+            self._send_sse_response(session_id)
+        except (ConnectionError, BrokenPipeError):
+            # Clean up if client disconnects
+            if session_id in server_state["notifications"]:
+                del server_state["notifications"][session_id]
+                
+    def do_POST(self):
+        """Handle POST requests."""
+        self.logger.debug(f"Received POST request to {self.path}")
+        self.logger.debug(f"Headers: {self.headers}")
+        
+        # Get content length
+        content_length = int(self.headers.get('Content-Length', 0))
+        if content_length == 0:
+            self.logger.error("No content received")
+            self._send_error(400, "No content received")
+            return
+            
+        # Read request body
+        try:
+            body = self.rfile.read(content_length).decode('utf-8')
+            self.logger.debug(f"Request body: {body}")
+            request = json.loads(body)
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON: {str(e)}")
+            self._send_error(400, f"Invalid JSON: {str(e)}")
+            return
+        except Exception as e:
+            self.logger.error(f"Error reading request: {str(e)}")
+            self._send_error(500, f"Error reading request: {str(e)}")
+            return
+            
+        # Process request
+        try:
+            response = self._handle_request(request)
+            self.logger.debug(f"Response: {response}")
+            
+            # Determine session_id for header, if applicable
+            session_id_for_header = None
+            if request.get("method") == "initialize" and "session" in response and "id" in response["session"]:
+                session_id_for_header = response["session"]["id"]
+            
+            # Check if the response from _handle_request is an error structure
+            if "error" in response and response.get("jsonrpc") == "2.0":
+                # This indicates _handle_request decided it's an error but didn't raise
+                # This path needs to be robust. For now, let's assume JSONRPCError is raised.
+                # If not, we might need to determine the HTTP status code differently.
+                # For simplicity, let's assume _send_error path is taken for actual errors.
+                # If we reach here with an error structure, it's a bit ambiguous.
+                # The current structure is that _handle_request returns a dict,
+                # and _send_response is called.
+                # Let's ensure _send_response gets the correct status code.
+                # JSON-RPC errors should ideally map to appropriate HTTP status codes.
+                # However, the spec often uses 200 OK with an error in the body.
+                # Let's stick to 200 OK if _handle_request returns.
+                self._send_response(200, response, session_id=session_id_for_header)
+            else:
+                # Successful response
+                self._send_response(200, response, session_id=session_id_for_header)
+            
+        except JSONRPCError as e: # Catch errors from _handle_request
+            # Map JSON-RPC errors to HTTP status codes if desired, or use a default like 400/500
+            # For now, _send_error uses a status code passed to it or a default.
+            # Here, we need to decide what HTTP status code to use for JSONRPCError.
+            # The existing _send_error takes a status code. Let's map some common ones.
+            http_status_code = 500 # Default server error
+            if e.code == -32700: # Parse error
+                http_status_code = 400
+            elif e.code == -32600: # Invalid Request
+                http_status_code = 400
+            elif e.code == -32601: # Method not found
+                http_status_code = 404
+            elif e.code == -32602: # Invalid params
+                http_status_code = 400
+            elif e.code == -32001: # Session errors (custom)
+                 http_status_code = 401 # Unauthorized or bad session
+            elif e.code == -32002: # Already initialized (custom)
+                 http_status_code = 409 # Conflict
+
+            # Create the JSON-RPC error response body
+            # error_response_body = self._create_error(e.code, e.message, e.data) # No longer needed here
+            # self._send_error(http_status_code, error_response_body["error"]["message"]) # _send_error will wrap this
+            self._send_error(http_status_code, e.message, rpc_error_code=e.code, rpc_error_data=e.data)
+            return
+
+        except Exception as e:
+            self.logger.error(f"Error processing request: {str(e)}")
+            self._send_error(500, f"Internal server error: {str(e)}")
+            return
+    
+    def _send_response(self, status_code: int, response_data: Dict[str, Any], session_id: Optional[str] = None) -> None:
+        """
+        Send an HTTP response with proper headers and status line.
+        
+        Args:
+            status_code: HTTP status code
+            response_data: Response data to send as JSON
+            session_id: Optional session ID to include in response headers
+        """
+        # Convert response data to JSON
+        response_json = json.dumps(response_data)
+        response_bytes = response_json.encode('utf-8')
+        
+        # Send HTTP status line and headers
+        self.send_response(status_code)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(response_bytes)))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, DELETE')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id')
+        
+        # Add session ID header if provided
+        if session_id:
+            self.send_header('Mcp-Session-Id', session_id)
+        
+        # End headers section
+        self.end_headers()
+        
+        # Send response body
+        self.wfile.write(response_bytes)
+        self.wfile.flush()
+    
+    def _send_sse_response(self, session_id: str) -> None:
+        """Send Server-Sent Events response."""
+        # Verify session is valid
+        if not self._verify_session():
+            return
+        
+        # Check connection limits
+        current_connections = count_session_connections(session_id)
+        if current_connections >= MAX_CONNECTIONS_PER_SESSION:
+            self._send_error(429, f"Too many connections for session (max {MAX_CONNECTIONS_PER_SESSION})")
+            return
+        
+        # Set up SSE response headers
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('Connection', 'keep-alive')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
         
-        # Create a message queue for this connection
-        message_queue = queue.Queue()
-        
-        # Add this connection to the list of SSE connections
-        connection_id = str(uuid.uuid4())
-        
-        # If session ID is provided, associate this connection with the session
-        session_id = self._get_session_id()
-        
+        # Create connection record
+        conn_id = str(uuid.uuid4())
         connection_info = {
-            "id": connection_id,
-            "queue": message_queue,
-            "wfile": self.wfile,
+            "id": conn_id,
             "session_id": session_id,
-            "created": time.time()
+            "created": time.time(),
+            "last_active": time.time(),
+            "connection": self.connection,
+            "wfile": self.wfile
         }
         
-        server_state["sse_connections"].append(connection_info)
-        
-        logger.info(f"SSE connection established: {connection_id} for session: {session_id}")
-        
         try:
-            # Send initial connection message
-            self.wfile.write(f"event: connected\ndata: {{'connectionId': '{connection_id}'}}\n\n".encode('utf-8'))
+            # Add to active connections
+            server_state["sse_connections"].append(connection_info)
+            
+            # Send initial keepalive
+            self.wfile.write(b": keepalive\n\n")
             self.wfile.flush()
             
-            # Keep the connection open
+            # Keep connection alive
             while not server_state["shutdown_requested"]:
-                try:
-                    # Check for messages in the queue (non-blocking)
-                    try:
-                        message = message_queue.get(block=True, timeout=1.0)
-                        
-                        # Format the message as an SSE event
-                        event_type = message.get("event", "message")
-                        message_data = json.dumps(message.get("data", {}))
-                        
-                        # Send the message as an SSE event
-                        self.wfile.write(f"event: {event_type}\ndata: {message_data}\n\n".encode('utf-8'))
-                        self.wfile.flush()
-                        
-                    except queue.Empty:
-                        # Send a keep-alive comment every second
-                        self.wfile.write(": keep-alive\n\n".encode('utf-8'))
-                        self.wfile.flush()
-                        
-                except (BrokenPipeError, ConnectionResetError):
-                    # Connection closed by client
+                # Check if connection is still valid
+                if time.time() - connection_info["last_active"] > CONNECTION_TIMEOUT:
+                    logger.info(f"Connection {conn_id} timed out")
                     break
-        
-        except Exception as e:
-            logger.error(f"SSE connection error: {str(e)}")
-            
+                
+                # Send keepalive every 30 seconds
+                time.sleep(30)
+                self.wfile.write(b": keepalive\n\n")
+                self.wfile.flush()
+                connection_info["last_active"] = time.time()
+                
+        except (BrokenPipeError, ConnectionResetError):
+            logger.info(f"Client disconnected: {conn_id}")
         finally:
-            # Remove this connection from the list
-            server_state["sse_connections"] = [
-                conn for conn in server_state["sse_connections"]
-                if conn["id"] != connection_id
-            ]
-            logger.info(f"SSE connection closed: {connection_id}")
-    
-    def do_POST(self):
-        """Handle POST requests containing JSON-RPC requests."""
-        try:
-            # According to the 2025-03-26 MCP spec, all MCP requests should go to /mcp endpoint
-            # Debug: Print all request information
-            logger.debug(f"Received POST request to path: {self.path}")
-            logger.debug(f"Headers: {dict(self.headers)}")
-            
-            # Check that this is a request to the MCP endpoint
-            if self.path != "/mcp":
-                self._send_error(404, "Not Found - MCP endpoint is at /mcp")
-                return
-            
-            # Check Accept header
-            accept_header = self.headers.get('Accept', 'application/json')
-            supports_json = 'application/json' in accept_header
-            supports_sse = 'text/event-stream' in accept_header
-            logger.debug(f"Accept header: {accept_header} (JSON: {supports_json}, SSE: {supports_sse})")
-            
-            # Content-Type check - more lenient
-            content_type = self.headers.get('Content-Type', '')
-            logger.debug(f"Content-Type: {content_type}")
-            
-            # Get content length from headers
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length == 0:
-                self._send_error(400, "Content-Length header is required")
-                return
-            
-            # Read the request body
-            request_body = self.rfile.read(content_length).decode('utf-8')
-            logger.debug(f"Received request body: {request_body}")
-            
-            # Parse the request as JSON
+            # Clean up connection
+            if connection_info in server_state["sse_connections"]:
+                server_state["sse_connections"].remove(connection_info)
             try:
-                if request_body.strip().startswith('['):
-                    # Handle batch request
-                    request_data = json.loads(request_body)
-                    if not isinstance(request_data, list):
-                        self._send_error(400, "Invalid batch request format")
-                        return
-                    
-                    # Process each request in the batch
-                    responses = []
-                    notifications_only = True
-                    
-                    for request in request_data:
-                        response = self._process_request(request)
-                        if response:  # Only add responses for non-notifications
-                            responses.append(response)
-                            notifications_only = False
-                    
-                    # Send appropriate response
-                    if notifications_only:
-                        # If only notifications, return 202 Accepted with no body
-                        self._send_response(202, None)
-                    else:
-                        # Send batch response
-                        self._send_response(200, responses, 
-                                          content_type="text/event-stream" if supports_sse else "application/json")
-                else:
-                    # Handle single request
-                    request_data = json.loads(request_body)
-                    response = self._process_request(request_data)
-                    
-                    # Send response (if not a notification)
-                    if response:
-                        # If client supports SSE and this is a request (not a response),
-                        # consider using SSE for the response
-                        if supports_sse and "method" in request_data:
-                            self._send_response(200, response, content_type="text/event-stream")
-                        else:
-                            self._send_response(200, response, content_type="application/json")
-                    else:
-                        # For notifications, send an empty 202 response
-                        self._send_response(202, None)
-                
-                # Check if shutdown was requested
-                if server_state["shutdown_requested"]:
-                    logger.info("Shutdown requested, stopping server")
-                    # Use a thread to avoid blocking the current request
-                    threading.Thread(target=stop_server).start()
-                
-            except json.JSONDecodeError:
-                self._send_error(400, "Invalid JSON")
-                
-        except Exception as e:
-            logger.error(f"Unhandled error: {str(e)}")
-            self._send_error(500, f"Internal server error: {str(e)}")
+                self.connection.close()
+            except:
+                pass
     
-    def _send_response(self, status_code: int, data: Any, content_type: str = "application/json"):
-        """Send an HTTP response with the given status code and data."""
-        self.send_response(status_code)
-        self.send_header('Access-Control-Allow-Origin', '*')
+    def _send_error(self, status_code: int, message: str, rpc_error_code: Optional[int] = None, rpc_error_data: Optional[Any] = None) -> None:
+        """
+        Send an error response.
         
-        # Check if we have a session ID to include in the response
-        if hasattr(self, 'session_id'):
-            self.send_header('Mcp-Session-Id', self.session_id)
+        Args:
+            status_code: HTTP status code
+            message: Error message
+            rpc_error_code: Optional JSON-RPC error code
+            rpc_error_data: Optional JSON-RPC error data
+        """
+        error_data = {
+            "jsonrpc": "2.0",
+            "error": {
+                "code": rpc_error_code if rpc_error_code is not None else -32000,  # Server error
+                "message": message
+            },
+            "id": None
+        }
+        if rpc_error_data is not None:
+            error_data["error"]["data"] = rpc_error_data
         
-        if data is not None:
-            self.send_header('Content-Type', content_type)
-            response_json = json.dumps(data)
-            response_bytes = response_json.encode('utf-8')
-            self.send_header('Content-Length', str(len(response_bytes)))
-            self.end_headers()
-            self.wfile.write(response_bytes)
-        else:
-            self.end_headers()
-    
-    def _send_error(self, status_code: int, message: str):
-        """Send an HTTP error response."""
-        self.send_response(status_code)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        error_data = {"error": message}
+        # Convert error data to JSON
         error_json = json.dumps(error_data)
         error_bytes = error_json.encode('utf-8')
+        
+        # Send HTTP status line and headers
+        self.send_response(status_code)
+        self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(error_bytes)))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, DELETE')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Accept, Mcp-Session-Id')
         self.end_headers()
+        
+        # Send error body
         self.wfile.write(error_bytes)
+        self.wfile.flush()
     
-    def _get_session_id(self):
-        """Get the session ID from headers."""
-        return self.headers.get('Mcp-Session-Id')
-    
-    def _verify_session(self):
-        """Verify the session ID is valid."""
+    def _get_session_id(self) -> Optional[str]:
+        """Get session ID from headers or query parameters."""
+        # Check headers first (case-insensitive)
+        for header, value in self.headers.items():
+            if header.lower() == 'mcp-session-id':
+                return value
+        
+        # Check query parameters if no header found
+        path = self.path.split('?')
+        if len(path) > 1:
+            params = urllib.parse.parse_qs(path[1])
+            if 'session' in params:
+                return params['session'][0]
+        
+        return None
+
+    def _verify_session(self) -> bool:
+        """Verify that the session is valid and active."""
         session_id = self._get_session_id()
         if not session_id:
+            self._send_error(401, "No session ID provided")
             return False
-            
-        # Check if session exists
+        
         if session_id not in server_state["sessions"]:
+            self._send_error(401, "Invalid session ID")
             return False
-            
+        
+        # Update session last activity time
+        server_state["sessions"][session_id]["last_active"] = time.time()
         return True
+
+    def _create_session(self) -> str:
+        """Create a new session and return its ID."""
+        session_id = str(uuid.uuid4())
+        server_state["sessions"][session_id] = {
+            "created": time.time(),
+            "last_active": time.time(),
+            "initialized": False,
+            "protocol_version": None
+        }
+        return session_id
     
-    def _process_request(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process a JSON-RPC request and return a response.
+        Handle a JSON-RPC request and return a response.
         
         Args:
             request: The JSON-RPC request object
             
         Returns:
-            The JSON-RPC response object, or None for notifications
+            The JSON-RPC response object
         """
+        self.logger.debug(f"Processing request: {request}")
+        
         try:
-            # Validate JSON-RPC request format
+            # Validate request format
+            if not isinstance(request, dict):
+                self.logger.error("Request must be a JSON object")
+                return self._create_error(-32600, "Request must be a JSON object")
+            
             if "jsonrpc" not in request or request["jsonrpc"] != "2.0":
-                raise JSONRPCError(-32600, "Invalid Request: jsonrpc field must be '2.0'")
+                self.logger.error("Invalid JSON-RPC version")
+                return self._create_error(-32600, "Invalid JSON-RPC version")
             
-            # Check if it's a notification (no id)
-            is_notification = "id" not in request
-            
-            # Get the method and params
             if "method" not in request:
-                raise JSONRPCError(-32600, "Invalid Request: method field is required")
+                self.logger.error("Method not specified")
+                return self._create_error(-32600, "Method not specified")
             
+            # Handle initialization
+            if request["method"] == "initialize":
+                self.logger.info("Processing initialize request")
+                return self._handle_initialize(request)
+            
+            # Get session ID
+            session_id = self._get_session_id()
+            if not session_id:
+                self.logger.error("No session ID provided")
+                return self._create_error(-32001, "No session ID provided")
+            
+            # Verify session is valid
+            if not self._verify_session():
+                self.logger.error("Invalid session")
+                return self._create_error(-32001, "Invalid session")
+            
+            # Handle other methods
             method = request["method"]
-            params = request.get("params", {})
-            request_id = request.get("id")
+            self.logger.debug(f"Handling method: {method}")
             
-            # For methods other than initialize, verify session if required
-            if method != "initialize" and server_state["initialized"]:
-                # If we have active sessions, require session ID
-                if server_state["sessions"] and not self._verify_session():
-                    raise JSONRPCError(-32000, "Invalid or missing session ID")
-            
-            # Process the method
-            result = self._handle_method(method, params)
-            
-            # Return the response (unless it's a notification)
-            if not is_notification:
+            try:
+                # Extract params from request to pass to handler methods
+                params = request.get("params", {})
+                
+                if method == "server/info":
+                    result = self._handle_server_info(params)
+                elif method == "tools/list":
+                    result = self._handle_tools_list(params)
+                elif method == "tools/call":
+                    result = self._handle_tool_call(params)
+                elif method == "tools/call-async":
+                    result = self._handle_tools_call_async(params)
+                elif method == "tools/result":
+                    result = self._handle_tools_result(params)
+                elif method == "tools/cancel":
+                    result = self._handle_tools_cancel(params)
+                elif method == "resources/list":
+                    result = self._handle_resources_list(params)
+                elif method == "resources/get":
+                    result = self._handle_resources_get(params)
+                elif method == "notifications/send":
+                    result = self._handle_send_notification(params)
+                elif method == "notifications/poll":
+                    result = self._handle_notifications_poll(params)
+                else:
+                    self.logger.error(f"Unknown method: {method}")
+                    return self._create_error(-32601, f"Method not found: {method}")
+                    
+                # Format successful response
                 return {
                     "jsonrpc": "2.0",
-                    "id": request_id,
+                    "id": request.get("id"),
                     "result": result
                 }
-            else:
-                return None
                 
-        except JSONRPCError as e:
-            # Return JSON-RPC error response (unless it's a notification)
-            if "id" in request:
-                error_data = {"code": e.code, "message": e.message}
-                if e.data:
-                    error_data["data"] = e.data
-                
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request["id"],
-                    "error": error_data
-                }
-            else:
-                return None
-    
-    def _handle_method(self, method: str, params: Dict[str, Any]) -> Any:
-        """
-        Handle a JSON-RPC method call.
-        
-        Args:
-            method: The method name
-            params: The method parameters
+            except JSONRPCError as e:
+                return self._create_error(e.code, e.message, e.data)
+            except Exception as e:
+                self.logger.error(f"Error handling method {method}: {str(e)}")
+                return self._create_error(-32603, f"Internal error: {str(e)}")
             
-        Returns:
-            The method result
-            
-        Raises:
-            JSONRPCError: If the method is invalid or fails
-        """
-        # Check if the server is initialized (except for initialize method)
-        if method != "initialize" and not server_state["initialized"]:
-            raise JSONRPCError(-32803, "Server not initialized")
+        except Exception as e:
+            self.logger.error(f"Error processing request: {str(e)}")
+            return self._create_error(-32603, f"Internal error: {str(e)}")
+
+    def _create_error(self, code: int, message: str, data: Any = None) -> Dict[str, Any]:
+        """Create a JSON-RPC error response."""
+        error = {
+            "code": code,
+            "message": message
+        }
+        if data is not None:
+            error["data"] = data
         
-        # Initialize method
-        if method == "initialize":
-            return self._handle_initialize(params)
-        
-        # Handle shutdown request
-        elif method == "shutdown":
-            return self._handle_shutdown(params)
-        
-        # Server info
-        elif method == "server/info":
-            return self._handle_server_info(params)
-        
-        # Tools methods (depends on protocol version)
-        elif method == "tools/list" or method == "mcp/tools":
-            return self._handle_tools_list(params)
-        
-        elif method == "tools/call" or method == "mcp/tools/call":
-            return self._handle_tools_call(params)
-        
-        # 2025-03-26 async tools methods
-        elif (method == "tools/call-async" or method == "mcp/tools/async") and server_state["protocol_version"] == "2025-03-26":
-            return self._handle_tools_call_async(params)
-            
-        elif method == "tools/result" and server_state["protocol_version"] == "2025-03-26":
-            return self._handle_tools_result(params)
-            
-        elif method == "tools/cancel" and server_state["protocol_version"] == "2025-03-26":
-            return self._handle_tools_cancel(params)
-        
-        # 2025-03-26 resources methods
-        elif method == "resources/list" and server_state["protocol_version"] == "2025-03-26":
-            return self._handle_resources_list(params)
-            
-        elif method == "resources/get" and server_state["protocol_version"] == "2025-03-26":
-            return self._handle_resources_get(params)
-        
-        # SSE methods
-        elif method == "notifications/send" and server_state["protocol_version"] == "2025-03-26":
-            return self._handle_send_notification(params)
-        
-        # Handle individual tool calls (direct method call)
-        elif any(tool["name"] == method for tool in TOOLS):
-            return self._call_tool(method, params)
-        
-        # Unknown method
-        else:
-            raise JSONRPCError(-32601, f"Method not found: {method}")
-    
-    def _handle_initialize(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "jsonrpc": "2.0",
+            "error": error,
+            "id": None
+        }
+
+    def _handle_initialize(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle the initialize method.
         
         Args:
-            params: The method parameters
+            request: The JSON-RPC request object
             
         Returns:
-            The initialization result
+            Server info and capabilities
             
         Raises:
             JSONRPCError: If initialization fails
         """
-        if server_state["initialized"]:
-            raise JSONRPCError(-32803, "Server already initialized")
+        self.logger.info("Processing initialize request")
         
-        # Check protocol version
-        protocol_version = params.get("protocolVersion")
-        if not protocol_version or protocol_version not in SUPPORTED_VERSIONS:
+        # Get params from request
+        params = request.get("params", {})
+        self.logger.debug(f"Initialize params: {params}")
+        
+        # Validate required parameters
+        if not isinstance(params, dict):
+            self.logger.error("Invalid params: not a dictionary")
+            raise JSONRPCError(-32602, "Invalid params: must be a dictionary")
+            
+        if "protocolVersion" not in params:
+            self.logger.error("Missing required parameter: protocolVersion")
+            raise JSONRPCError(-32602, "Missing required parameter: protocolVersion")
+            
+        if "clientInfo" not in params:
+            self.logger.error("Missing required parameter: clientInfo")
+            raise JSONRPCError(-32602, "Missing required parameter: clientInfo")
+            
+        if "capabilities" not in params:
+            self.logger.error("Missing required parameter: capabilities")
+            raise JSONRPCError(-32602, "Missing required parameter: capabilities")
+        
+        # Validate protocol version
+        protocol_version = params["protocolVersion"]
+        if protocol_version not in SUPPORTED_VERSIONS:
+            self.logger.error(f"Unsupported protocol version: {protocol_version}")
             raise JSONRPCError(-32602, f"Unsupported protocol version: {protocol_version}")
         
-        # Get client capabilities
-        client_capabilities = params.get("capabilities", {})
-        client_info = params.get("clientInfo", {})
+        # Create new session if one isn't already part of the context (e.g. from headers)
+        # For initialize, we always create a new one as per typical MCP flow.
+        session_id = self._create_session()
+        self.logger.info(f"Created new session for initialize: {session_id}")
         
-        # Set server state
-        server_state["initialized"] = True
-        server_state["protocol_version"] = protocol_version
+        # Store session info, including protocol version and initialized status
+        server_state["sessions"][session_id]["protocol_version"] = protocol_version
+        server_state["sessions"][session_id]["initialized"] = True
+        server_state["sessions"][session_id]["capabilities"] = params["capabilities"]
+        # 'created' and 'last_active' are already set by _create_session
         
-        # Generate a session ID (visible ASCII characters only)
-        session_id = str(uuid.uuid4())
-        
-        # Store session info
-        server_state["sessions"][session_id] = {
-            "created": time.time(),
-            "client_info": client_info,
-            "protocol_version": protocol_version
-        }
-        
-        # Store the session ID to be included in the response headers later
-        # We can't directly send headers here as they must be sent before the body
-        # The _send_response method will add this header
-        self.session_id = session_id
-        
-        # Prepare server capabilities
-        server_capabilities = {
-            "tools": True
-        }
-        
-        # Add 2025-03-26 specific capabilities
-        if protocol_version == "2025-03-26":
-            server_capabilities["tools"] = {
-                "asyncSupported": True
-            }
-            server_capabilities["resources"] = True
-        
-        # Return initialization result
-        return {
-            "protocolVersion": protocol_version,
+        # Create response
+        response = {
             "serverInfo": {
-                "name": "Minimal MCP HTTP Server",
+                "name": "MinimalHTTPMCPServer",
                 "version": "1.0.0",
-                "supportedVersions": SUPPORTED_VERSIONS
+                "protocolVersion": protocol_version
             },
-            "capabilities": server_capabilities
+            "capabilities": {
+                "protocolVersion": protocol_version,
+                "tools": {
+                    "asyncSupported": True
+                },
+                "resources": True
+            },
+            "session": {
+                "id": session_id
+            }
         }
-    
-    def _handle_shutdown(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle the shutdown method.
         
-        Args:
-            params: The method parameters
-            
-        Returns:
-            An empty result
-        """
-        # Set shutdown flag (will exit after response is sent)
-        server_state["shutdown_requested"] = True
-        return {}
+        self.logger.debug(f"Initialize response: {response}")
+        
+        # Add session ID to response headers
+        # self.send_header('Mcp-Session-Id', session_id) # Removed: _send_response will handle this
+        
+        return response
     
     def _handle_server_info(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -589,7 +757,18 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
             
         Returns:
             Server information
+        
+        Raises:
+            JSONRPCError: If session is invalid or not initialized
         """
+        session_id = self._get_session_id()
+        if not session_id or session_id not in server_state["sessions"]:
+            raise JSONRPCError(-32001, "Invalid or missing session ID")
+
+        session = server_state["sessions"][session_id]
+        if not session.get("initialized"):
+            raise JSONRPCError(-32003, "Session not initialized")
+            
         return {
             "name": "Minimal MCP HTTP Server",
             "version": "1.0.0",
@@ -599,20 +778,32 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
     def _handle_tools_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle the tools/list method.
-        
         Args:
-            params: The method parameters
-            
+            params: The method parameters (expected to be empty for tools/list)
         Returns:
             List of available tools
         """
+        session_id = self._get_session_id()
+        if not session_id or session_id not in server_state["sessions"]:
+            # This case should ideally be caught by _verify_session in _handle_request
+            raise JSONRPCError(-32001, "Invalid or missing session ID")
+
+        session = server_state["sessions"][session_id]
+        if not session.get("initialized"):
+            raise JSONRPCError(-32003, "Session not initialized")
+
+        protocol_version = session.get("protocol_version")
+        if not protocol_version:
+            # Should not happen if session is initialized
+            raise JSONRPCError(-32004, "Protocol version not set for session")
+
         # Adapt tool format for 2024-11-05 if needed
         tools_list = []
         for tool in TOOLS:
             tool_copy = tool.copy()
             
             # For 2024-11-05, convert 'parameters' to 'inputSchema'
-            if server_state["protocol_version"] == "2024-11-05":
+            if protocol_version == "2024-11-05":
                 if "parameters" in tool_copy:
                     tool_copy["inputSchema"] = tool_copy.pop("parameters")
             
@@ -620,30 +811,48 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
         
         return {"tools": tools_list}
     
-    def _handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_tool_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle the tools/call method.
-        
         Args:
-            params: The method parameters
-            
+            params: The method parameters, e.g., {"name": "tool_name", "parameters": {...}}
         Returns:
             The tool call result
-            
         Raises:
             JSONRPCError: If the tool call fails
         """
-        # Validate params
+        session_id = self._get_session_id()
+        if not session_id or session_id not in server_state["sessions"]:
+            raise JSONRPCError(-32001, "Invalid or missing session ID")
+
+        session = server_state["sessions"][session_id]
+        if not session.get("initialized"):
+            raise JSONRPCError(-32003, "Session not initialized")
+
+        protocol_version = session.get("protocol_version")
+        if not protocol_version:
+            raise JSONRPCError(-32004, "Protocol version not set for session")
+
+        self.logger.debug(f"_handle_tool_call: Received params: {params}, type: {type(params)}")
+        
+        # Add more detailed debugging
+        self.logger.info(f"Tool call params details: {json.dumps(params, indent=2)}")
+        self.logger.info(f"Protocol version from session: {protocol_version}")
+        
+        # Validate params for the tool call itself (e.g., presence of "name")
         if "name" not in params:
-            raise JSONRPCError(-32602, "Missing required parameter: name")
+            self.logger.error(f"_handle_tool_call: 'name' not in params. Keys: {list(params.keys()) if isinstance(params, dict) else 'Not a dict'}. Params content: {params}")
+            raise JSONRPCError(-32602, "Missing required parameter: name for tool call")
         
         tool_name = params["name"]
         
-        # Get the tool arguments based on protocol version
-        if server_state["protocol_version"] == "2025-03-26":
+        # Get the tool arguments based on protocol version stored in the session
+        if protocol_version == "2025-03-26":
             arguments = params.get("parameters", {})
-        else:
+            self.logger.info(f"Using 'parameters' key for 2025-03-26: {arguments}")
+        else: # 2024-11-05
             arguments = params.get("arguments", {})
+            self.logger.info(f"Using 'arguments' key for 2024-11-05: {arguments}")
         
         # Call the tool
         return self._call_tool(tool_name, arguments)
@@ -651,21 +860,31 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
     def _handle_tools_call_async(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle the tools/call-async method (2025-03-26 only).
-        
         Args:
             params: The method parameters
-            
         Returns:
             The async task ID
-            
         Raises:
             JSONRPCError: If the async tool call fails
         """
-        # Validate params
+        session_id = self._get_session_id()
+        if not session_id or session_id not in server_state["sessions"]:
+            raise JSONRPCError(-32001, "Invalid or missing session ID")
+
+        session = server_state["sessions"][session_id]
+        if not session.get("initialized"):
+            raise JSONRPCError(-32003, "Session not initialized")
+
+        protocol_version = session.get("protocol_version")
+        if protocol_version != "2025-03-26": # call-async is 2025-03-26 specific
+            raise JSONRPCError(-32601, f"Method tools/call-async not supported in protocol version {protocol_version}")
+
+        # Validate params for the call-async itself
         if "name" not in params:
-            raise JSONRPCError(-32602, "Missing required parameter: name")
+            raise JSONRPCError(-32602, "Missing required parameter: name for tools/call-async")
         
         tool_name = params["name"]
+        # For 2025-03-26, tool arguments are under "parameters"
         arguments = params.get("parameters", {})
         
         # Find the tool
@@ -698,19 +917,28 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
     def _handle_tools_result(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle the tools/result method (2025-03-26 only).
-        
         Args:
             params: The method parameters
-            
         Returns:
             The tool result status
-            
         Raises:
             JSONRPCError: If the result check fails
         """
-        # Validate params
+        session_id = self._get_session_id()
+        if not session_id or session_id not in server_state["sessions"]:
+            raise JSONRPCError(-32001, "Invalid or missing session ID")
+
+        session = server_state["sessions"][session_id]
+        if not session.get("initialized"):
+            raise JSONRPCError(-32003, "Session not initialized")
+        
+        protocol_version = session.get("protocol_version")
+        if protocol_version != "2025-03-26":
+            raise JSONRPCError(-32601, f"Method tools/result not supported in protocol version {protocol_version}")
+
+        # Validate params for tools/result
         if "id" not in params:
-            raise JSONRPCError(-32602, "Missing required parameter: id")
+            raise JSONRPCError(-32602, "Missing required parameter: id for tools/result")
         
         call_id = params["id"]
         
@@ -743,19 +971,28 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
     def _handle_tools_cancel(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle the tools/cancel method (2025-03-26 only).
-        
         Args:
             params: The method parameters
-            
         Returns:
             Cancellation success status
-            
         Raises:
             JSONRPCError: If the cancellation fails
         """
-        # Validate params
+        session_id = self._get_session_id()
+        if not session_id or session_id not in server_state["sessions"]:
+            raise JSONRPCError(-32001, "Invalid or missing session ID")
+
+        session = server_state["sessions"][session_id]
+        if not session.get("initialized"):
+            raise JSONRPCError(-32003, "Session not initialized")
+
+        protocol_version = session.get("protocol_version")
+        if protocol_version != "2025-03-26":
+            raise JSONRPCError(-32601, f"Method tools/cancel not supported in protocol version {protocol_version}")
+
+        # Validate params for tools/cancel
         if "id" not in params:
-            raise JSONRPCError(-32602, "Missing required parameter: id")
+            raise JSONRPCError(-32602, "Missing required parameter: id for tools/cancel")
         
         call_id = params["id"]
         
@@ -778,31 +1015,50 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
     def _handle_resources_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle the resources/list method (2025-03-26 only).
-        
         Args:
-            params: The method parameters
-            
+            params: The method parameters (expected to be empty)
         Returns:
             List of available resources
         """
+        session_id = self._get_session_id()
+        if not session_id or session_id not in server_state["sessions"]:
+            raise JSONRPCError(-32001, "Invalid or missing session ID")
+
+        session = server_state["sessions"][session_id]
+        if not session.get("initialized"):
+            raise JSONRPCError(-32003, "Session not initialized")
+
+        protocol_version = session.get("protocol_version")
+        if protocol_version != "2025-03-26":
+            raise JSONRPCError(-32601, f"Method resources/list not supported in protocol version {protocol_version}")
+
         return {"resources": RESOURCES}
     
     def _handle_resources_get(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle the resources/get method (2025-03-26 only).
-        
         Args:
-            params: The method parameters
-            
+            params: The method parameters, e.g., {"id": "resource_id"}
         Returns:
             The requested resource
-            
         Raises:
             JSONRPCError: If the resource is not found
         """
-        # Validate params
+        session_id = self._get_session_id()
+        if not session_id or session_id not in server_state["sessions"]:
+            raise JSONRPCError(-32001, "Invalid or missing session ID")
+
+        session = server_state["sessions"][session_id]
+        if not session.get("initialized"):
+            raise JSONRPCError(-32003, "Session not initialized")
+
+        protocol_version = session.get("protocol_version")
+        if protocol_version != "2025-03-26":
+            raise JSONRPCError(-32601, f"Method resources/get not supported in protocol version {protocol_version}")
+
+        # Validate params for resources/get
         if "id" not in params:
-            raise JSONRPCError(-32602, "Missing required parameter: id")
+            raise JSONRPCError(-32602, "Missing required parameter: id for resources/get")
         
         resource_id = params["id"]
         
@@ -815,58 +1071,99 @@ class MCPHTTPRequestHandler(BaseHTTPRequestHandler):
     
     def _handle_send_notification(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle sending a notification via SSE.
-        
+        Handle the notifications/send method.
         Args:
-            params: The notification parameters
-            
+            params: The method parameters, e.g., {"type": "...", "data": {...}, "sessionId": "optional_target"}
         Returns:
             Success status
-            
         Raises:
-            JSONRPCError: If sending fails
+            JSONRPCError: If sending the notification fails
         """
-        # Validate params
-        if "event" not in params:
-            raise JSONRPCError(-32602, "Missing required parameter: event")
-        
+        current_session_id = self._get_session_id()
+        if not current_session_id or current_session_id not in server_state["sessions"]:
+            raise JSONRPCError(-32001, "Invalid or missing session ID for sending notification")
+
+        current_session = server_state["sessions"][current_session_id]
+        if not current_session.get("initialized"):
+            raise JSONRPCError(-32003, "Session not initialized for sending notification")
+
+        # Validate params for the notification itself
+        if "type" not in params:
+            raise JSONRPCError(-32602, "Missing required parameter: type for notification")
         if "data" not in params:
-            raise JSONRPCError(-32602, "Missing required parameter: data")
+            raise JSONRPCError(-32602, "Missing required parameter: data for notification")
+            
+        notification_type = params["type"]
+        notification_data = params["data"]
+        target_session_id_param = params.get("sessionId") # Optional specific target for the notification
         
-        # Get target session ID (optional)
-        target_session = params.get("sessionId")
-        
-        # Broadcast or send to specific session
-        sent_count = 0
-        
-        if target_session:
-            # Send to specific session
-            for conn in server_state["sse_connections"]:
-                if conn.get("session_id") == target_session:
-                    try:
-                        conn["queue"].put({
-                            "event": params["event"],
-                            "data": params["data"]
-                        })
-                        sent_count += 1
-                    except Exception as e:
-                        logger.error(f"Failed to send notification to connection {conn['id']}: {str(e)}")
-        else:
-            # Broadcast to all connections
-            for conn in server_state["sse_connections"]:
-                try:
-                    conn["queue"].put({
-                        "event": params["event"],
-                        "data": params["data"]
-                    })
-                    sent_count += 1
-                except Exception as e:
-                    logger.error(f"Failed to send notification to connection {conn['id']}: {str(e)}")
-        
-        return {
-            "success": sent_count > 0,
-            "sentCount": sent_count
+        # Create notification object
+        notification = {
+            "type": notification_type,
+            "data": notification_data
         }
+        
+        try:
+            # If target session specified, send only to that session
+            if target_session_id_param:
+                if target_session_id_param not in server_state["sessions"]:
+                    raise JSONRPCError(-32602, f"Invalid target session ID for notification: {target_session_id_param}")
+                # Also check if the target session is initialized (optional, depends on requirements)
+                # target_session_for_notification = server_state["sessions"][target_session_id_param]
+                # if not target_session_for_notification.get("initialized"):
+                #     raise JSONRPCError(-32003, f"Target session {target_session_id_param} not initialized")
+                send_sse_message_to_session(target_session_id_param, notification, "notification")
+            else:
+                # Broadcast to all SSE connections of the *current* session if no target is specified
+                # Or, if this is meant to be a global broadcast (e.g. admin initiated), 
+                # then broadcast_sse_message() would be used. Current design implies session context.
+                # For now, let's assume if no target_session_id_param, it's for the current session's SSE streams.
+                send_sse_message_to_session(current_session_id, notification, "notification")
+            
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"Failed to send notification: {str(e)}")
+            raise JSONRPCError(-32603, f"Failed to send notification: {str(e)}")
+    
+    def _handle_notifications_poll(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle the notifications/poll method.
+        Args:
+            params: The method parameters (expected to be empty)
+        Returns:
+            List of pending notifications
+        Raises:
+            JSONRPCError: If polling fails
+        """
+        session_id = self._get_session_id()
+        if not session_id or session_id not in server_state["sessions"]:
+            raise JSONRPCError(-32001, "Invalid or missing session ID for polling")
+            
+        session = server_state["sessions"][session_id]
+        if not session.get("initialized"):
+            raise JSONRPCError(-32003, "Session not initialized for polling")
+
+        # Rate limit polling - check last poll time
+        current_time = time.time()
+        if "last_poll_time" in session:
+            time_since_last_poll = current_time - session["last_poll_time"]
+            if time_since_last_poll < RATE_LIMIT_WINDOW:
+                raise JSONRPCError(
+                    -32000, 
+                    f"Rate limit exceeded - wait at least {RATE_LIMIT_WINDOW} seconds between polls"
+                )
+        
+        # Update last poll time
+        session["last_poll_time"] = current_time
+        
+        # Clean up any stale connections before processing notifications
+        cleanup_stale_connections()
+        
+        # Get and clear pending notifications for this session
+        notifications = server_state["notifications"].get(session_id, [])
+        server_state["notifications"][session_id] = []
+        
+        return {"notifications": notifications}
     
     def _call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         """
@@ -935,110 +1232,116 @@ def signal_handler(sig, frame):
     logger.info("Received signal %s, shutting down", sig)
     stop_server()
 
-def run_server(host: str, port: int, debug: bool = False):
-    """
-    Run the HTTP server.
+def setup_logging(debug: bool = False):
+    """Set up logging configuration."""
+    logger = logging.getLogger('MCPHTTPServer')
+    logger.setLevel(logging.DEBUG if debug else logging.INFO)
     
-    Args:
-        host: The host to bind to
-        port: The port to bind to
-        debug: Whether to enable debug logging
-    """
-    global http_server
+    # Remove any existing handlers
+    logger.handlers = []
     
-    if debug:
-        logger.setLevel(logging.DEBUG)
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(console_handler)
     
-    # Set up signal handlers
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # File handler
+    file_handler = logging.handlers.RotatingFileHandler(
+        '/tmp/mcp_http_server.log',
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
+    )
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
     
-    # Create and start the server
-    server_address = (host, port)
-    http_server = ThreadingHTTPServer(server_address, MCPHTTPRequestHandler)
-    logger.info(f"Starting server on {host}:{port}")
+    return logger
+
+def run_server(host: str, port: int, debug: bool = False) -> None:
+    """Run the HTTP server."""
+    logger = setup_logging(debug)
+    logger.info(f"Starting MCP HTTP Server on {host}:{port}")
     
     try:
-        # Run the server
-        http_server.serve_forever()
-    except KeyboardInterrupt:
-        logger.info("Keyboard interrupt received, shutting down")
-    finally:
-        # Clean up
-        http_server.server_close()
-        logger.info("Server stopped")
-
+        # Create server with proper error handling
+        server = ThreadingHTTPServer((host, port), MCPHTTPRequestHandler)
+        server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        
+        # Set up signal handlers for graceful shutdown
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}, shutting down")
+            server.shutdown()
+            server.server_close()
+            sys.exit(0)
+            
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+        
+        # Start server
+        logger.info("Server started and ready to accept connections")
+        server.serve_forever()
+        
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            logger.error(f"Port {port} is already in use")
+        else:
+            logger.error(f"Failed to start server: {str(e)}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Unexpected error starting server: {str(e)}")
+        sys.exit(1)
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Minimal HTTP MCP Server"
-    )
-    parser.add_argument(
-        "--host", 
-        default="localhost",
-        help="Host to bind to (default: localhost)"
-    )
-    parser.add_argument(
-        "--port", 
-        type=int, 
-        default=9000,
-        help="Port to bind to (default: 9000)"
-    )
-    parser.add_argument(
-        "--debug", 
-        action="store_true",
-        help="Enable debug logging"
-    )
-    
+    parser = argparse.ArgumentParser(description='MCP HTTP Server')
+    parser.add_argument('--host', type=str, default='localhost', help='Host to listen on (default: localhost)')
+    parser.add_argument('--port', type=int, default=9000, help='Port to listen on (default: 9000)')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
     
-    # Run the server
     run_server(args.host, args.port, args.debug)
 
 
 if __name__ == "__main__":
     main()
 
-# Function to broadcast a message to all SSE connections
-def broadcast_sse_message(message: Dict[str, Any], event_type: str = "message"):
-    """
-    Broadcast a message to all SSE connections.
+def cleanup_stale_connections():
+    """Clean up stale SSE connections and sessions."""
+    current_time = time.time()
     
-    Args:
-        message: The message to broadcast
-        event_type: The SSE event type
-    """
-    for connection in server_state["sse_connections"]:
-        try:
-            connection["queue"].put({
-                "event": event_type,
-                "data": message
-            })
-        except Exception as e:
-            logger.error(f"Failed to queue message for connection {connection['id']}: {str(e)}")
-
-# Function to send a message to a specific session's SSE connections
-def send_sse_message_to_session(session_id: str, message: Dict[str, Any], event_type: str = "message"):
-    """
-    Send a message to all SSE connections for a specific session.
-    
-    Args:
-        session_id: The target session ID
-        message: The message to send
-        event_type: The SSE event type
-    """
-    sent = False
-    
-    for connection in server_state["sse_connections"]:
-        if connection.get("session_id") == session_id:
+    # Clean up stale SSE connections
+    for conn in server_state["sse_connections"][:]:  # Create copy to avoid modification during iteration
+        if current_time - conn["last_active"] > CONNECTION_TIMEOUT:
+            logger.info(f"Removing stale connection: {conn['id']} for session: {conn['session_id']}")
             try:
-                connection["queue"].put({
-                    "event": event_type,
-                    "data": message
-                })
-                sent = True
-            except Exception as e:
-                logger.error(f"Failed to queue message for connection {connection['id']}: {str(e)}")
+                conn["connection"].close()
+            except:
+                pass
+            if conn in server_state["sse_connections"]:
+                server_state["sse_connections"].remove(conn)
     
-    return sent 
+    # Clean up stale sessions
+    for session_id in list(server_state["sessions"].keys()):
+        session = server_state["sessions"][session_id]
+        if current_time - session["last_active"] > (CONNECTION_TIMEOUT * 2):  # Give sessions longer timeout
+            logger.info(f"Removing stale session: {session_id}")
+            # Clean up any remaining connections for this session
+            for conn in server_state["sse_connections"][:]:
+                if conn["session_id"] == session_id:
+                    try:
+                        conn["connection"].close()
+                    except:
+                        pass
+                    if conn in server_state["sse_connections"]:
+                        server_state["sse_connections"].remove(conn)
+            # Remove session
+            del server_state["sessions"][session_id]
+            # Clean up notifications
+            if session_id in server_state["notifications"]:
+                del server_state["notifications"][session_id]
+
+def count_session_connections(session_id: str) -> int:
+    """Count active SSE connections for a session."""
+    # Clean up stale connections first
+    cleanup_stale_connections()
+    # Count remaining active connections
+    return sum(1 for conn in server_state["sse_connections"] if conn["session_id"] == session_id) 

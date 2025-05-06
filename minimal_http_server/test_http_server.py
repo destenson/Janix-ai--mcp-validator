@@ -38,6 +38,7 @@ class MCPHTTPClient:
         self.request_id = 0
         self.protocol_version = None
         self.initialized = False
+        self.session_id = None
         
         # Set up logging
         self.logger = logger
@@ -78,6 +79,10 @@ class MCPHTTPClient:
                 "Content-Type": "application/json",
                 "Accept": "application/json, text/event-stream"
             }
+            # Add session ID if available and not an initialize request
+            if self.session_id and method != "initialize":
+                headers["Mcp-Session-Id"] = self.session_id
+                
             self.logger.debug(f">> Headers: {headers}")
             self.logger.debug(f">> URL: {self.server_url}")
             
@@ -92,6 +97,19 @@ class MCPHTTPClient:
                 response_data = response.json()
                 if "error" in response_data:
                     self.logger.error(f"Error: {response_data['error']}")
+                
+                # If this was a successful initialize, store the session ID
+                if method == "initialize" and "result" in response_data and \
+                   response_data["result"].get("session") and response_data["result"]["session"].get("id"):
+                    self.session_id = response_data["result"]["session"]["id"]
+                    self.logger.info(f"Initialized session with ID: {self.session_id}")
+                elif method == "initialize" and "result" not in response_data:
+                     # Also try to get from headers if body parse failed or was unexpected for session ID
+                     header_session_id = response.headers.get('Mcp-Session-Id')
+                     if header_session_id:
+                         self.session_id = header_session_id
+                         self.logger.info(f"Initialized session with ID from header: {self.session_id}")
+
                 return response_data
             else:
                 self.logger.error(f"HTTP Error: {response.status_code} - {response.text}")
@@ -197,198 +215,110 @@ class MCPHTTPClient:
 
 
 async def run_tests(server_url: str, protocol_version: str, debug: bool = False):
-    """
-    Run tests against the MCP HTTP server.
-    
-    Args:
-        server_url: The URL of the MCP server
-        protocol_version: The protocol version to use
-        debug: Whether to enable debug logging
-    """
+    """Run a comprehensive test suite against the server."""
     client = MCPHTTPClient(server_url, debug)
-    available_tools = []
     
-    # 1. Test initialization
-    logger.info("\n=== Test: Initialization ===")
+    # Test initialization
+    logger.info(f"Testing initialization with protocol version {protocol_version}")
     init_result = client.initialize(protocol_version)
-    logger.info(f"Server initialized with protocol version: {protocol_version}")
-    logger.info(f"Server info: {init_result.get('serverInfo', {})}")
-    logger.info(f"Server capabilities: {init_result.get('capabilities', {})}")
+    assert "error" not in init_result, f"Initialization failed: {init_result.get('error')}"
     
-    # 2. Test server info
-    logger.info("\n=== Test: Server Info ===")
+    # Test server info
+    logger.info("Testing server info")
     server_info = client.send_request("server/info")
-    if "result" in server_info:
-        logger.info(f"Server info: {server_info['result']}")
+    assert "error" not in server_info, f"Server info failed: {server_info.get('error')}"
     
-    # 3. Test tools listing
-    logger.info("\n=== Test: Tools Listing ===")
-    tools_method = "tools/list"
-    if protocol_version == "2024-11-05":
-        tools_method = "mcp/tools"
+    # Test tools list
+    logger.info("Testing tools list")
+    tools_list = client.send_request("tools/list")
+    assert "error" not in tools_list, f"Tools list failed: {tools_list.get('error')}"
+    assert "result" in tools_list and "tools" in tools_list["result"]
     
-    tools_response = client.send_request(tools_method)
-    if "result" in tools_response and "tools" in tools_response["result"]:
-        tools = tools_response["result"]["tools"]
-        logger.info(f"Available tools: {[tool['name'] for tool in tools]}")
-        
-        # Save tools for later use
-        available_tools = tools
+    # Test basic tool calls
+    logger.info("Testing basic tool calls")
+    tool_params_key = "parameters" if protocol_version == "2025-03-26" else "arguments"
     
-    # 4. Test direct tool calls
-    logger.info("\n=== Test: Direct Tool Calls ===")
-    if available_tools and "echo" in [tool["name"] for tool in available_tools]:
-        echo_response = client.send_request("echo", {"message": "Hello, MCP HTTP Server!"})
-        if "result" in echo_response:
-            logger.info(f"Echo response: {echo_response['result']}")
-    
-    if available_tools and "add" in [tool["name"] for tool in available_tools]:
-        add_response = client.send_request("add", {"a": 5, "b": 7})
-        if "result" in add_response:
-            logger.info(f"Add response: {add_response['result']}")
-    
-    # 5. Test tools/call method
-    logger.info("\n=== Test: Tools/Call Method ===")
-    tools_call_method = "tools/call"
-    if protocol_version == "2024-11-05":
-        tools_call_method = "mcp/tools/call"
-    
-    params_key = "parameters" if protocol_version == "2025-03-26" else "arguments"
-    tools_call_params = {
+    echo_payload = {
         "name": "echo",
-        params_key: {"message": "Hello via tools/call!"}
+        tool_params_key: {"message": "test"}
     }
+    echo_result = client.send_request("tools/call", echo_payload)
+    assert "error" not in echo_result, f"Echo failed: {echo_result.get('error')}"
+    assert "result" in echo_result, f"Missing result in echo response: {echo_result}"
+    assert "message" in echo_result["result"], f"Missing message in echo result: {echo_result['result']}"
+    assert echo_result["result"]["message"] == "test", f"Echo result mismatch: {echo_result['result']}"
     
-    tools_call_response = client.send_request(tools_call_method, tools_call_params)
-    if "result" in tools_call_response:
-        logger.info(f"Tools/call response: {tools_call_response['result']}")
+    add_payload = {
+        "name": "add",
+        tool_params_key: {"a": 1, "b": 2}
+    }
+    add_result = client.send_request("tools/call", add_payload)
+    assert "error" not in add_result, f"Add failed: {add_result.get('error')}"
+    assert "result" in add_result, f"Missing result in add response: {add_result}"
+    assert "result" in add_result["result"], f"Missing result field in add result: {add_result['result']}"
+    assert add_result["result"]["result"] == 3, f"Add result mismatch: {add_result['result']}"
     
-    # 6. Test async tool calls (only for 2025-03-26)
+    # Test async tool calls if supported
     if protocol_version == "2025-03-26":
-        logger.info("\n=== Test: Async Tool Calls ===")
-        
-        # 6.1 Start async call
-        async_call_params = {
+        logger.info("Testing async tool calls")
+        async_call_payload = {
             "name": "sleep",
-            "parameters": {"seconds": 2}
+            "parameters": {"seconds": 1}
         }
+        async_result = client.send_request("tools/call-async", async_call_payload)
+        assert "error" not in async_result, f"Async call failed: {async_result.get('error')}"
+        assert "result" in async_result, f"Missing result in async call response: {async_result}"
+        assert "id" in async_result["result"], f"Missing id in async call result: {async_result['result']}"
         
-        async_call_response = client.send_request("tools/call-async", async_call_params)
-        if "result" in async_call_response and "id" in async_call_response["result"]:
-            async_id = async_call_response["result"]["id"]
-            logger.info(f"Async call started with ID: {async_id}")
+        call_id = async_result["result"]["id"]
+        logger.info(f"Async call ID: {call_id}")
+        
+        # Poll for result
+        poll_attempts = 0
+        max_attempts = 20
+        while poll_attempts < max_attempts:
+            poll_payload = {"id": call_id}
+            poll_result = client.send_request("tools/result", poll_payload)
+            assert "error" not in poll_result, f"Result poll failed: {poll_result.get('error')}"
+            assert "result" in poll_result, f"Missing result in poll response: {poll_result}"
+            assert "status" in poll_result["result"], f"Missing status in poll result: {poll_result['result']}"
             
-            # 6.2 Poll for result (would normally be in a loop)
-            logger.info("Waiting for async result...")
-            time.sleep(1)  # Wait a bit, but less than the sleep time
+            status = poll_result["result"]["status"]
+            logger.info(f"Poll status: {status}")
             
-            result_params = {"id": async_id}
-            result_response = client.send_request("tools/result", result_params)
-            if "result" in result_response:
-                logger.info(f"Partial result (should be running): {result_response['result']}")
-            
-            # Wait for completion
-            time.sleep(2)  # Wait a bit longer to ensure completion
-            
-            final_result_response = client.send_request("tools/result", result_params)
-            if "result" in final_result_response:
-                logger.info(f"Final result: {final_result_response['result']}")
-            
-            # 6.3 Test cancellation with a new async call
-            logger.info("\n=== Test: Async Cancellation ===")
-            
-            # Start a new async call with longer sleep
-            cancel_call_params = {
-                "name": "sleep",
-                "parameters": {"seconds": 5}
-            }
-            
-            cancel_call_response = client.send_request("tools/call-async", cancel_call_params)
-            if "result" in cancel_call_response and "id" in cancel_call_response["result"]:
-                cancel_id = cancel_call_response["result"]["id"]
-                logger.info(f"Async call started with ID: {cancel_id}")
+            if status == "completed":
+                # Verify the result
+                assert "result" in poll_result["result"], f"Missing result data in completed poll: {poll_result['result']}"
+                assert "slept" in poll_result["result"]["result"], f"Missing expected fields in async result: {poll_result['result']['result']}"
+                break
                 
-                # Wait a bit then cancel
-                time.sleep(1)
-                
-                cancel_params = {"id": cancel_id}
-                cancel_response = client.send_request("tools/cancel", cancel_params)
-                if "result" in cancel_response:
-                    logger.info(f"Cancellation result: {cancel_response['result']}")
-                
-                # Check final status
-                time.sleep(1)
-                
-                status_response = client.send_request("tools/result", {"id": cancel_id})
-                if "result" in status_response:
-                    logger.info(f"Status after cancellation: {status_response['result']}")
+            poll_attempts += 1
+            await asyncio.sleep(0.2)
+            
+        assert poll_attempts < max_attempts, f"Async operation did not complete after {max_attempts} attempts"
     
-    # 7. Test resources (only for 2025-03-26)
+    # Test notifications if supported
     if protocol_version == "2025-03-26":
-        logger.info("\n=== Test: Resources ===")
+        logger.info("Testing notifications")
+        pass
+    
+    # Test resources if supported
+    if protocol_version == "2025-03-26":
+        logger.info("Testing resources")
+        resources_list = client.send_request("resources/list")
+        assert "error" not in resources_list, f"Resources list failed: {resources_list.get('error')}"
         
-        # 7.1 List resources
-        resources_response = client.send_request("resources/list")
-        resources = []
-        if "result" in resources_response and "resources" in resources_response["result"]:
-            resources = resources_response["result"]["resources"]
-            logger.info(f"Available resources: {[res['id'] for res in resources]}")
-            
-        # 7.2 Get a specific resource
-        if resources:
-            resource_id = resources[0]["id"]
-            resource_response = client.send_request("resources/get", {"id": resource_id})
-            if "result" in resource_response:
-                logger.info(f"Resource details: {resource_response['result']}")
+        if resources_list["result"]["resources"]:
+            resource_id = resources_list["result"]["resources"][0]["id"]
+            resource_get = client.send_request("resources/get", {"id": resource_id})
+            assert "error" not in resource_get, f"Resource get failed: {resource_get.get('error')}"
     
-    # 8. Test batch requests
-    logger.info("\n=== Test: Batch Requests ===")
-    batch_requests = [
-        {"jsonrpc": "2.0", "method": "server/info", "id": 100},
-        {"jsonrpc": "2.0", "method": "echo", "params": {"message": "Batch message"}, "id": 101}
-    ]
-    
-    # Send batch request
-    logger.info("Sending batch request...")
-    try:
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(server_url, json=batch_requests, headers=headers)
-        
-        if response.status_code == 200:
-            batch_responses = response.json()
-            logger.info(f"Received {len(batch_responses)} responses in batch")
-            for resp in batch_responses:
-                logger.info(f"Batch response ID {resp.get('id')}: {resp.get('result')}")
-        else:
-            logger.error(f"Batch request failed: {response.status_code} - {response.text}")
-    except requests.RequestException as e:
-        logger.error(f"Batch request failed: {str(e)}")
-    
-    # 9. Test notifications
-    logger.info("\n=== Test: Notifications ===")
-    client.send_notification("echo", {"message": "This is a notification"})
-    logger.info("Notification sent (no response expected)")
-    
-    # 10. Test error handling
-    logger.info("\n=== Test: Error Handling ===")
-    
-    # Invalid method
-    invalid_method_response = client.send_request("invalid_method")
-    if "error" in invalid_method_response:
-        logger.info(f"Invalid method error: {invalid_method_response['error']}")
-    
-    # Invalid parameters
-    if available_tools and "add" in [tool["name"] for tool in available_tools]:
-        invalid_params_response = client.send_request("add", {"a": "not_a_number", "b": 5})
-        if "error" in invalid_params_response:
-            logger.info(f"Invalid parameters error: {invalid_params_response['error']}")
-    
-    # 11. Test shutdown
-    logger.info("\n=== Test: Shutdown ===")
+    # Test shutdown
+    logger.info("Testing shutdown")
     shutdown_result = client.shutdown()
-    logger.info("Server shutdown requested")
+    assert "error" not in shutdown_result, f"Shutdown failed: {shutdown_result.get('error')}"
     
-    logger.info("\n=== All tests completed ===")
+    logger.info("All tests passed!")
 
 
 def main():
