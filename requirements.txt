@@ -1,6 +1,6 @@
 # MCP Protocol Validator Dependencies
 requests>=2.31.0
-pytest>=7.4.0
+pytest>=8.0.0
 jsonschema>=4.20.0
 pytest-html>=3.2.0
 click==8.1.7
@@ -8,4 +8,7 @@ rich==13.5.2
 pathlib>=1.0.1
 pydantic>=2.3.0
 # Removing aiohttp due to build issues with Python 3.12
-sseclient-py==1.7.2 
+sseclient-py==1.7.2
+aiohttp>=3.11.0
+pytest-asyncio>=0.23.0
+pytest-aiohttp>=1.0.0 
