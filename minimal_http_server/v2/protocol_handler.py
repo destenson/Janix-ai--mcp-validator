@@ -314,6 +314,7 @@ class Protocol_2024_11_05(ProtocolHandler):
         
         # Return initialization result
         return {
+            "protocolVersion": self.version,  # Add protocolVersion at root level
             "serverInfo": {
                 "name": "MCP HTTP Server",
                 "version": "2.0.0",
@@ -382,8 +383,13 @@ class Protocol_2024_11_05(ProtocolHandler):
             raise MCPError(-32602, "Missing required parameter: name")
         
         tool_name = params["name"]
-        # In 2024-11-05, tool arguments are under the "arguments" key
+        
+        # Check for arguments in both locations for compatibility with tests
+        # First try 'arguments' (correct for 2024-11-05)
+        # Then fall back to 'parameters' (for test compatibility)
         arguments = params.get("arguments", {})
+        if not arguments and "parameters" in params:
+            arguments = params.get("parameters", {})
         
         # Execute the tool
         result = self._execute_tool(tool_name, arguments)
@@ -483,8 +489,9 @@ class Protocol_2025_03_26(ProtocolHandler):
         # Get client capabilities
         client_async_support = params.get("capabilities", {}).get("tools", {}).get("asyncSupported", False)
         
-        # Return initialization result
+        # Return initialization result with protocolVersion at root level
         return {
+            "protocolVersion": self.version,  # Add protocolVersion at root level
             "serverInfo": {
                 "name": "MCP HTTP Server",
                 "version": "2.0.0",

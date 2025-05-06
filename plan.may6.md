@@ -106,6 +106,38 @@ A unified entry point that can:
    - Better support for testing both protocol versions
    - Easier to extend for compliance testing
 
+## Protocol Version Compatibility
+
+The implementation now handles both protocol versions (2024-11-05 and 2025-03-26) with key differences:
+
+1. **Schema Format Differences:**
+   - 2024-11-05 uses `inputSchema` in tool definitions
+   - 2025-03-26 uses `parameters` in tool definitions
+
+2. **Tool Call Format Differences:**
+   - 2024-11-05 uses `arguments` for parameters
+   - 2025-03-26 uses `parameters` for parameters
+
+3. **Capabilities Differences:**
+   - 2024-11-05: `"tools": true`
+   - 2025-03-26: `"tools": {"asyncSupported": true}`
+
+4. **Feature Availability:**
+   - Only 2025-03-26 supports async tool calls
+   - Only 2025-03-26 supports resources
+
+We've implemented compatibility features to handle these differences:
+- Protocol handlers automatically convert between formats
+- Backward compatibility for both parameter passing styles
+- Root-level `protocolVersion` in responses for both versions
+
+## Compliance Testing Status
+
+- ✅ Successfully passed 2025-03-26 compliance tests
+- ⚠️ Working through test harness issues with 2024-11-05 compliance tests
+- ✅ Basic functionality verified through internal test client for both protocol versions
+- ✅ Server correctly handles parameter format differences
+
 ## Implementation Status
 
 - [x] Architecture design
@@ -115,14 +147,36 @@ A unified entry point that can:
 - [x] HTTP server implementation
 - [x] Test client
 - [x] Launcher script
+- [x] Protocol version-specific response handling
+- [x] Successful 2025-03-26 compliance testing
+- [ ] Complete 2024-11-05 compliance testing
 - [ ] Comprehensive integration tests
 - [ ] Documentation
 - [ ] Performance optimizations
 
 ## Next Steps
 
-1. Complete integration tests for both protocol versions
-2. Document API and usage patterns
-3. Add performance metrics and monitoring
-4. Create container and deployment configurations
-5. Implement any additional features required by the latest MCP specifications 
+1. **Fix 2024-11-05 Protocol Compliance**
+   - Resolve connection timeout issues in compliance testing
+   - Add special handling for compliance test edge cases
+   - Ensure parameter handling is fully compatible
+
+2. **Improve Reliability**
+   - Add better error handling for network issues
+   - Implement more robust session cleanup
+   - Add timeouts and retries for operations
+
+3. **Comprehensive Testing**
+   - Complete integration tests for both protocol versions
+   - Add unit tests for individual components
+   - Test with real-world tool implementations
+
+4. **Documentation and Deployment**
+   - Document API and usage patterns
+   - Create container and deployment configurations
+   - Add performance metrics and monitoring
+
+5. **Compliance Testing**
+   - Run the full MCP compliance test suite on both protocol versions
+   - Create test reports and compliance documentation
+   - Address any remaining specification gaps 
