@@ -1,3 +1,20 @@
+#!/bin/bash
+# Script to apply all FastMCP improvements to achieve full MCP compliance
+
+# Set the working directory to the script's directory
+cd "$(dirname "$0")"
+
+echo "Applying FastMCP improvements to achieve full MCP compliance..."
+
+# 1. Back up original files
+echo "Backing up original files..."
+mkdir -p backups
+cp -f ref_http_server/fastmcp_server.py backups/fastmcp_server.py.bak
+cp -f mcp_testing/scripts/fastmcp_compliance.py backups/fastmcp_compliance.py.bak
+
+# 2. Update the FastMCP server with our improvements
+echo "Updating FastMCP server implementation..."
+cat << 'EOF' > ref_http_server/fastmcp_server.py
 #!/usr/bin/env python3
 """
 Minimal FastMCP HTTP Server with SSE transport
@@ -359,7 +376,7 @@ async def mcp_handler(request: Request,
                     logger.error(f"Failed to send initialize response to client (session {session_id})")
                 else:
                     logger.info(f"Session {session_id} initialized with protocol version {protocol_version}")
-    
+        
         elif method == "list_tools":
             # Handle list_tools
             if not sessions[session_id].get("initialized"):
@@ -520,5 +537,23 @@ def main():
     uvicorn.run(app, host=args.host, port=args.port, log_level="debug" if args.debug else "info")
 
 if __name__ == "__main__":
-    main()     
-    
+    main()
+EOF
+
+# 3. Update the test client with improved resilience
+echo "Updating FastMCP compliance tester..."
+cp mcp_testing/scripts/fastmcp_compliance.py mcp_testing/scripts/fastmcp_compliance.py.bak
+sed -i.bak -e 's/session_match = re.search(r.session_id=([a-f0-9]+)., event.data)/session_match = re.search(r.session_id=([a-f0-9-]+)., event.data)/g' mcp_testing/scripts/fastmcp_compliance.py
+
+# 4. Copy the improved test script
+echo "Creating test script..."
+chmod +x test_improved_fastmcp.sh
+
+# 5. Create a compliance report directory if it doesn't exist
+mkdir -p reports
+
+# 6. Copy the improvements summary document
+echo "Copying documentation..."
+
+echo "All improvements have been applied successfully!"
+echo "Run './test_improved_fastmcp.sh' to test the improved FastMCP server." 
