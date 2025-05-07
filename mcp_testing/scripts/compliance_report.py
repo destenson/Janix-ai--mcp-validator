@@ -54,8 +54,6 @@ from mcp_testing.tests.specification_coverage import TEST_CASES as SPEC_COVERAGE
 
 # Imports for adapters
 from mcp_testing.transports.stdio import StdioTransportAdapter
-from mcp_testing.transports.http import HttpTransportAdapter
-from mcp_testing.transports.fastmcp_http import FastMCPHttpAdapter
 from mcp_testing.protocols.v2024_11_05 import MCP2024_11_05Adapter
 from mcp_testing.protocols.v2025_03_26 import MCP2025_03_26Adapter
 from mcp_testing.protocols.base import MCPProtocolAdapter
@@ -109,25 +107,18 @@ def is_http_url(server_command: str) -> bool:
 class VerboseTestRunner:
     """A test runner that provides verbose output during test execution."""
     
-    def __init__(self, debug: bool = False, fastmcp: bool = False):
+    def __init__(self, debug: bool = False):
         """Initialize the test runner.
 
         Parameters
         ----------
         debug
             Enable verbose logging from the transport + protocol layers.
-        fastmcp
-            When *True* the runner will instantiate the ``FastMCPHttpAdapter``
-            instead of the regular ``HttpTransportAdapter`` for HTTP
-            transports.  This flag replaces the previous accidental reference
-            to the outer-scope ``args`` object which caused a ``NameError``
-            at runtime.
         """
         self.debug = debug
-        self.fastmcp = fastmcp
     
     async def run_tests(self, tests: List[Callable], protocol: str, server_command: str, 
-                       env_vars: Dict[str, str], transport: str = "stdio", debug: bool = False, 
+                       env_vars: Dict[str, str], debug: bool = False, 
                        timeout: float = 30.0) -> Dict[str, Any]:
         """
         Run a list of tests with verbose output.
@@ -135,9 +126,8 @@ class VerboseTestRunner:
         Args:
             tests: List of test functions to run
             protocol: Protocol version to test against
-            server_command: Command to start the server or URL for HTTP transport
+            server_command: Command to start the server
             env_vars: Environment variables to set
-            transport: Transport type ("stdio" or "http")
             debug: Whether to enable debug output
             timeout: Test timeout in seconds
             
@@ -150,8 +140,7 @@ class VerboseTestRunner:
         skipped = 0
         timeouts = 0
         
-        # Determine if shutdown should be globally skipped (e.g., by env var used by is_shutdown_skipped)
-        # This can be overridden by server-specific config later if needed.
+        # Determine if shutdown should be globally skipped
         global_skip_shutdown = is_shutdown_skipped()
 
         for test_item in tests:
@@ -166,8 +155,7 @@ class VerboseTestRunner:
             transport_adapter = None # Ensure it's defined for finally block
             protocol_adapter: MCPProtocolAdapter = None # Ensure it's defined for finally block
 
-            # Skip shutdown-related tests if shutdown is disabled globally or by server config
-            # This check is simplified here; server_config specific skip is handled by test_runner usually
+            # Skip shutdown-related tests if shutdown is disabled
             if global_skip_shutdown and (test_name == "test_shutdown" or test_name == "test_exit_after_shutdown"):
                 if self.debug:
                     log_with_timestamp(f"Skipping {test_name} because shutdown is disabled")
@@ -185,31 +173,17 @@ class VerboseTestRunner:
             try:
                 log_with_timestamp(f"Running test: {test_name}")
 
-                # 1. Create and start transport adapter
-                if transport == "stdio":
-                    transport_adapter = StdioTransportAdapter(
-                        server_command=server_command,
-                        env_vars=env_vars,
-                        debug=self.debug
-                    )
-                elif transport == "http":
-                    if self.fastmcp:
-                        transport_adapter = FastMCPHttpAdapter(
-                            server_url=server_command,
-                            debug=self.debug
-                        )
-                    else:
-                        transport_adapter = HttpTransportAdapter(
-                            server_url=server_command,
-                            debug=self.debug
-                        )
-                else:
-                    raise ValueError(f"Unsupported transport type: {transport}")
+                # Create and start transport adapter
+                transport_adapter = StdioTransportAdapter(
+                    server_command=server_command,
+                    env_vars=env_vars,
+                    debug=self.debug
+                )
                 
                 if not transport_adapter.start():
                     raise Exception("Failed to start transport adapter")
 
-                # 2. Create protocol adapter
+                # Create protocol adapter
                 if protocol == "2024-11-05":
                     protocol_adapter = MCP2024_11_05Adapter(
                         transport=transport_adapter,
@@ -223,7 +197,7 @@ class VerboseTestRunner:
                 else:
                     raise ValueError(f"Unsupported protocol version: {protocol}")
 
-                # 3. Initialize connection
+                # Initialize connection
                 if self.debug:
                     log_with_timestamp(f"  Initializing server for {test_name}...")
                 await protocol_adapter.initialize()
@@ -231,7 +205,7 @@ class VerboseTestRunner:
                     log_with_timestamp(f"  Sending initialized notification for {test_name}...")
                 await protocol_adapter.send_initialized()
 
-                # 4. Run the actual test function with the protocol adapter
+                # Run the actual test function with the protocol adapter
                 test_passed, message = await asyncio.wait_for(
                     test_func(protocol_adapter),
                     timeout=timeout
@@ -283,13 +257,9 @@ class VerboseTestRunner:
                     "message": str(e)
                 })
             finally:
-                # 5. Shutdown sequence
+                # Shutdown sequence
                 if protocol_adapter:
-                    current_skip_shutdown = global_skip_shutdown
-                    # Potentially check server-specific config for skip_shutdown if available
-                    # For now, relies on global_skip_shutdown for simplicity in this runner
-
-                    if not current_skip_shutdown:
+                    if not global_skip_shutdown:
                         try:
                             if self.debug:
                                 log_with_timestamp(f"  Shutting down for {test_name}...")
@@ -316,7 +286,7 @@ class VerboseTestRunner:
 async def main():
     """Run the compliance tests and generate a report."""
     parser = argparse.ArgumentParser(description="Generate a compliance report for an MCP server.")
-    parser.add_argument("--server-command", required=True, help="Command to start the server or URL if using HTTP transport")
+    parser.add_argument("--server-command", required=True, help="Command to start the server")
     parser.add_argument("--protocol-version", required=True, help="Protocol version to test against")
     parser.add_argument("--server-config", help="Path to server configuration file")
     parser.add_argument("--args", help="Additional arguments to pass to the server")
@@ -335,23 +305,14 @@ async def main():
     parser.add_argument("--test-timeout", type=int, default=30, help="Timeout for individual tests in seconds")
     parser.add_argument("--tools-timeout", type=int, default=30, help="Timeout for tool tests in seconds")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
-    parser.add_argument("--fastmcp", action="store_true", help="Use FastMCP-specific HTTP/SSE adapter")
 
     args = parser.parse_args()
-
-    # Determine if we're using HTTP transport
-    transport_type = "http" if is_http_url(args.server_command) else "stdio"
     
-    # For HTTP transport, server_command is the URL
-    if transport_type == "http":
-        log_with_timestamp(f"Using HTTP transport with server URL: {args.server_command}")
-        full_server_command = args.server_command
-    else:
-        # For STDIO transport, build the full command with args
-        full_server_command = args.server_command
-        if args.args:
-            full_server_command = f"{full_server_command} {args.args}"
-        log_with_timestamp(f"Using STDIO transport with command: {full_server_command}")
+    # Build the full command with args
+    full_server_command = args.server_command
+    if args.args:
+        full_server_command = f"{full_server_command} {args.args}"
+    log_with_timestamp(f"Using command: {full_server_command}")
 
     # Auto-detect protocol version if requested
     if args.auto_detect:
@@ -477,7 +438,7 @@ async def main():
     
     if args.verbose or True:  # Always use verbose logging
         # Use our custom verbose test runner
-        runner = VerboseTestRunner(debug=args.debug, fastmcp=args.fastmcp)
+        runner = VerboseTestRunner(debug=args.debug)
         
         # Group tests by type and run with appropriate timeouts
         tool_tests = [(func, name) for func, name in tests if name.startswith("test_tool_") or name.startswith("test_tools_")]
@@ -488,8 +449,7 @@ async def main():
             log_with_timestamp(f"Running {len(non_tool_tests)} non-tool tests with {test_timeout}s timeout")
             non_tool_results = await runner.run_tests(
                 non_tool_tests, 
-                protocol=args.protocol_version, 
-                transport=transport_type,  # Use detected transport type
+                protocol=args.protocol_version,
                 server_command=full_server_command,
                 env_vars=env_vars,
                 debug=args.debug,
@@ -503,8 +463,7 @@ async def main():
             log_with_timestamp(f"Running {len(tool_tests)} tool tests with {tools_timeout}s timeout")
             tool_results = await runner.run_tests(
                 tool_tests, 
-                protocol=args.protocol_version, 
-                transport=transport_type,  # Use detected transport type
+                protocol=args.protocol_version,
                 server_command=full_server_command,
                 env_vars=env_vars,
                 debug=args.debug,
@@ -528,10 +487,9 @@ async def main():
         runner = MCPTestRunner(debug=args.debug)
         results = await run_tests(
             tests, 
-            args.protocol_version, 
-            transport_type,  # Use detected transport type
-            full_server_command,
-            env_vars,
+            args.protocol_version,
+            server_command=full_server_command,
+            env_vars=env_vars,
             debug=args.debug,
             timeout=tools_timeout  # Use the longer timeout for all tests in non-verbose mode
         )
