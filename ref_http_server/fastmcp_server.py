@@ -11,6 +11,8 @@ import asyncio
 import logging
 import uvicorn
 from typing import List
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from mcp.server.fastmcp import FastMCP
 
@@ -62,6 +64,16 @@ async def main():
     # Get the ASGI application from FastMCP
     app = fastmcp.sse_app()
     
+    # Add CORS middleware to the app
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["Mcp-Session-Id"],
+    )
+    
     print(f"Starting FastMCP HTTP server at http://{args.host}:{args.port}")
     print(f"Supported protocol versions: 2024-11-05, 2025-03-26")
     print("Press Ctrl+C to stop the server")
@@ -85,4 +97,5 @@ async def main():
     await server.serve()
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())     
+    
