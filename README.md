@@ -140,6 +140,38 @@ The `test_improved_fastmcp.sh` script automates testing:
 
 This implementation provides a lightweight alternative to WebSockets while maintaining full protocol compliance.
 
+### HTTP Reference Implementation
+
+A reference implementation using HTTP transport with:
+
+- JSON-RPC 2.0 over HTTP implementation
+- Support for protocol version 2025-03-26
+- Synchronous and asynchronous tool calls
+- Batch request support
+- CORS support for browser clients
+
+```bash
+# Start the reference HTTP server (runs on port 8088)
+python ref_http_server/reference_mcp_server.py
+
+# Run compliance tests and generate a detailed report
+python ref_http_server/http_compliance_test.py --output-dir reports
+```
+
+The compliance test will:
+- Run a comprehensive test suite
+- Generate a detailed markdown report in the reports directory
+- Test core functionality including:
+  - Protocol initialization
+  - Tools functionality (echo, add, sleep)
+  - Error handling
+  - Batch requests
+  - Session management
+  - Protocol negotiation
+  - Ping utility
+
+See the [HTTP Server README](ref_http_server/README.md) for more details.
+
 ## MCP Testing Framework
 
 A flexible framework for verifying MCP server compliance with protocol specifications.

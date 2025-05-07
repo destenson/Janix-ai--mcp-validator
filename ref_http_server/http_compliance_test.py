@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 import uuid
+import os
 
 import httpx
 
@@ -36,6 +37,7 @@ class McpHttpComplianceTest:
         self.session_id = None
         self.results = {}
         self.protocol_version = "2025-03-26"  # Default protocol version
+        self.test_start_time = None
         
         if debug:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -43,6 +45,7 @@ class McpHttpComplianceTest:
     
     def run_tests(self) -> bool:
         """Run all compliance tests."""
+        self.test_start_time = time.time()
         success = True
         
         # Test 1: Initialization
@@ -800,11 +803,102 @@ class McpHttpComplianceTest:
         
         print(f"\nSummary: {success_count}/{total_count} tests passed ({skipped_count} skipped)")
 
+    def generate_report(self, output_dir: str = "reports") -> str:
+        """Generate a detailed markdown report of the test results."""
+        # Ensure output directory exists
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Generate timestamp for the report filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_file = os.path.join(output_dir, f"http_compliance_test_{timestamp}.md")
+        
+        # Calculate test duration
+        duration = time.time() - self.test_start_time if self.test_start_time else 0
+        
+        # Count successful tests
+        success_count = sum(1 for result in self.results.values() if result.get("status") == "success")
+        total_count = len(self.results)
+        skipped_count = sum(1 for result in self.results.values() if result.get("status") == "skipped")
+        
+        # Generate markdown content
+        lines = [
+            "# MCP HTTP Server Compliance Report",
+            "",
+            "## Test Information",
+            "",
+            f"- **Server URL**: `{self.server_url}`",
+            f"- **Protocol Version**: {self.protocol_version}",
+            f"- **Test Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"- **Test Duration**: {duration:.2f} seconds",
+            "",
+            "## Test Results Summary",
+            "",
+            f"- **Total Tests**: {total_count}",
+            f"- **Passed**: {success_count}",
+            f"- **Failed**: {total_count - success_count - skipped_count}",
+            f"- **Skipped**: {skipped_count}",
+            f"- **Success Rate**: {(success_count / (total_count - skipped_count) * 100):.1f}%",
+            "",
+            "## Detailed Results",
+            ""
+        ]
+        
+        # Add detailed results for each test
+        for test_name, result in self.results.items():
+            status = result.get("status", "unknown")
+            status_icon = "✅" if status == "success" else "❌" if status == "failed" else "⚠️"
+            
+            lines.extend([
+                f"### {test_name.replace('_', ' ').title()}",
+                "",
+                f"**Status**: {status_icon} {status.title()}"
+            ])
+            
+            # Add test-specific details
+            if status == "success":
+                if test_name == "initialization":
+                    lines.extend([
+                        "",
+                        "**Details**:",
+                        f"- Protocol Version: {result.get('protocol_version')}",
+                        f"- Server Info: {result.get('server_info')}",
+                        f"- Session ID: {result.get('session_id')}"
+                    ])
+                elif test_name == "tools_functionality":
+                    lines.extend([
+                        "",
+                        "**Details**:",
+                        f"- Available Tools: {', '.join(result.get('available_tools', []))}"
+                    ])
+                elif test_name == "ping":
+                    lines.extend([
+                        "",
+                        "**Details**:",
+                        f"- Response Time: {result.get('elapsed_seconds', 0):.3f} seconds"
+                    ])
+            elif status in ["failed", "error"]:
+                lines.extend([
+                    "",
+                    "**Error Details**:",
+                    f"```",
+                    f"{result.get('error', 'No error details available')}",
+                    f"```"
+                ])
+            
+            lines.append("")  # Add blank line between sections
+        
+        # Write the report
+        with open(report_file, "w") as f:
+            f.write("\n".join(lines))
+        
+        return report_file
+
 def main():
     """Run the tests."""
     parser = argparse.ArgumentParser(description="Test MCP HTTP server for specification compliance")
     parser.add_argument("--server-url", default="http://localhost:8088", help="URL of the MCP server")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--output-dir", default="reports", help="Directory to store the report files")
     args = parser.parse_args()
     
     # Create and run the tester
@@ -813,8 +907,12 @@ def main():
     # Run the tests
     success = tester.run_tests()
     
-    # Print results
+    # Print results to console
     tester.print_results()
+    
+    # Generate markdown report
+    report_file = tester.generate_report(args.output_dir)
+    logger.info(f"Compliance report generated: {report_file}")
     
     # Exit with appropriate code
     sys.exit(0 if success else 1)
