@@ -67,80 +67,22 @@ Each test run generates a detailed report containing:
 - Server capabilities
 - Session information
 
-## OLD CONTENT
+## Testing Scripts Overview
 
-The following sections contain historical information about various implementations and may not reflect the current state of the project.
+The following scripts are available in `mcp_testing/scripts/`:
 
-### Reference Implementations
+### Active and Maintained
+- `http_compliance_test.py`: Primary script for HTTP server testing (7/7 tests passing)
+- `compliance_report.py`: Primary script for STDIO server testing (36/37 tests passing)
 
-#### STDIO Reference Implementations
+### Supporting Scripts mixed working/in progress
+- `basic_interaction.py`: Simple tool for testing basic server functionality
+- `http_test.py`: Lower-level HTTP testing utilities
+- `http_compliance.py`: Core HTTP compliance testing logic
+- `http_compliance_report.py`: Report generation for HTTP tests
+- `run_stdio_tests.py`: Lower-level STDIO testing utilities
+- `session_test.py`: Session management testing utilities
 
-Two reference implementations using STDIO for transport:
-
-##### 2024-11-05 Protocol Version
-```bash
-python ./ref_stdio_server/stdio_server_2024_11_05.py
-```
-
-##### 2025-03-26 Protocol Version
-```bash
-python ./ref_stdio_server/stdio_server_2025_03_26.py
-```
-
-#### Minimal HTTP MCP Server
-
-```bash
-python ./minimal_http_server/minimal_http_server.py
-python ./minimal_http_server/minimal_http_server.py --host 0.0.0.0 --port 8080
-python ./minimal_http_server/test_http_server.py
-python -m mcp_testing.scripts.http_test --server-url http://localhost:8000 --protocol-version 2025-03-26
-```
-
-See the [HTTP Server README](minimal_http_server/README.md) for more details.
-
-#### FastMCP HTTP Server with SSE Transport
-
-```bash
-python ./ref_http_server/fastmcp_server.py --debug
-./test_improved_fastmcp.sh
-```
-
-##### Key Features
-- SSE Transport
-- Connection Management
-- Session Management
-- HTTP Integration
-
-### MCP Testing Framework
-
-#### For STDIO Servers:
-
-```bash
-python -m mcp_testing.scripts.basic_interaction --server-command "./minimal_mcp_server/minimal_mcp_server.py"
-python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26
-```
-
-#### For HTTP Servers:
-
-```bash
-python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
-```
-
-#### For HTTP with SSE Servers:
-
-```bash
-./test_improved_fastmcp.sh
-```
-
-### Testing Pip-Installed MCP Servers
-
-```bash
-source .venv/bin/activate
-pip install mcp-server-fetch sseclient-py==1.7.2
-
-python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
-python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-mode tools
-python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-timeout 30 --tools-timeout 15
 ```
 
 ## License
