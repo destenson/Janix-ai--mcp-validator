@@ -3,7 +3,7 @@
 ## Priority 1: Code Organization and Cleanup
 
 1. **Consolidate Test Scripts**
-   - [ ] Merge similar test functionality in `mcp_testing/scripts/`
+   - [x] Move redundant HTTP testing scripts to archive
    - [ ] Create a unified testing API for both HTTP and STDIO servers
    - [ ] Standardize test reporting formats
 
