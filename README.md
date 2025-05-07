@@ -131,9 +131,6 @@ The HTTP compliance test suite verifies:
 
 1. Protocol Initialization
 2. Tools Functionality
-   - Echo command
-   - Add operation
-   - Sleep function (async capabilities)
 3. Error Handling
 4. Batch Request Processing
 5. Session Management
