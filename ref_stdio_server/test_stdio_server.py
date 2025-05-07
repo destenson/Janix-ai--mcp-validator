@@ -3,9 +3,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 """
-Simple Test Script for Minimal MCP Server
+Test Script for Reference MCP STDIO Server
 
-This script starts the minimal MCP server as a subprocess and
+This script starts the reference MCP STDIO server as a subprocess and
 interacts with it directly using standard I/O to verify basic functionality.
 """
 
@@ -19,17 +19,17 @@ import argparse
 def main():
     """Main test function."""
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Test the minimal MCP server.")
+    parser = argparse.ArgumentParser(description="Test the reference MCP STDIO server.")
     parser.add_argument("--protocol-version", choices=["2024-11-05", "2025-03-26"], 
                         default="2024-11-05", help="Protocol version to use")
     parser.add_argument("--full", action="store_true", 
                         help="Run all tests including optional ones")
     args = parser.parse_args()
     
-    print(f"Starting minimal MCP server test with protocol version {args.protocol_version}...")
+    print(f"Starting reference MCP STDIO server test with protocol version {args.protocol_version}...")
     
     # Start the server process
-    server_cmd = "./minimal_mcp_server.py"  # Server is in the same directory
+    server_cmd = "./stdio_server.py"  # Server is in the same directory
     server_process = subprocess.Popen(
         server_cmd,
         stdin=subprocess.PIPE,

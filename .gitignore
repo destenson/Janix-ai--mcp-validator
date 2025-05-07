@@ -10,6 +10,7 @@ mcp_testing/server_configs/*
 opensource_plan.md
 htmlcov
 .coverage
+.pytest_cache/
 
 # Virtual environment
 .venv/

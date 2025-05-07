@@ -4,127 +4,99 @@ A testing suite and reference implementation for the [Model Context Protocol (MC
 
 ## Summary
 
-The MCP Protocol Validator provides a comprehensive environment for testing and validating MCP server implementations. With reference implementations for both STDIO and HTTP transports, along with an extensive testing framework, it ensures developers can verify their servers comply with the MCP specification. The modular architecture supports various server configurations, transport methods, and provides detailed compliance reporting, making it an essential tool for MCP server development and validation.
+The MCP Protocol Validator provides a comprehensive environment for testing and validating MCP server implementations. It includes reference implementations and a testing framework to ensure compliance with the MCP specification.
 
-## Overview
 
-This repository contains:
+## STDIO Compliance Testing
 
-1. **Minimal MCP Server**: A reference implementation using STDIO transport
-2. **Minimal HTTP MCP Server**: A reference implementation using HTTP transport
-3. **MCP Testing Framework**: A comprehensive testing framework for verifying MCP server implementations
+The validator includes a comprehensive testing suite for STDIO-based MCP servers.
 
-The current implementation is fully compliant with the latest MCP protocol specification (2025-03-26).
-
-✅ All tests pass for the reference implementations!
-
----
-
-## Reference Implementations
-
-### Minimal MCP Server (STDIO)
-
-A simple reference implementation that uses STDIO for transport and supports:
-
-- Basic protocol operations (initialization, shutdown)
-- Synchronous tool calls
-- Asynchronous tool calls (for 2025-03-26)
-- Utility tools for file system operations
+### Running STDIO Tests
 
 ```bash
-# Run the server
-python ./minimal_mcp_server/minimal_mcp_server.py
+# Run compliance tests for the STDIO server
+python -m mcp_testing.scripts.compliance_report --server-command "python ref_stdio_server/stdio_server_2025_03_26.py" --protocol-version 2025-03-26
 ```
 
-#### Supported Tools
+### STDIO Test Coverage
 
-- `echo`: Echo input text
-- `add`: Add two numbers
-- `sleep`: Sleep for specified seconds (useful for testing async operations)
-- `list_directory`: List files in a directory
-- `read_file`: Read a file
-- `write_file`: Write a file
+The STDIO compliance tests verify:
+1. Protocol Initialization
+2. Tools Functionality
+   - Basic tools (echo, add)
+   - Async tools (sleep) for 2025-03-26 version
+3. Error Handling
+4. Protocol Version Negotiation
 
-### Minimal HTTP MCP Server
+### Testing Different STDIO Server Types
 
-A reference implementation using HTTP transport with:
+The validator supports testing any STDIO-based MCP server, whether it's run directly from a command or installed via pip. Here's how to test different types of servers:
 
-- JSON-RPC 2.0 over HTTP implementation
-- Support for both protocol versions (2024-11-05 and 2025-03-26)
-- Synchronous and asynchronous tool calls
-- Resources capability (for 2025-03-26)
-- Batch request support
-- CORS support for browser clients
+#### Direct Command Testing
+
+For servers that run directly from a Python file or command:
 
 ```bash
-# Run the server with default settings (localhost:8000)
-python ./minimal_http_server/minimal_http_server.py
+# Test a local Python file
+python -m mcp_testing.scripts.compliance_report --server-command "python path/to/your/server.py" --protocol-version 2025-03-26
 
-# Run with custom host and port
-python ./minimal_http_server/minimal_http_server.py --host 0.0.0.0 --port 8080
+# Test with specific timeouts
+python -m mcp_testing.scripts.compliance_report --server-command "python path/to/server.py" --protocol-version 2025-03-26 --test-timeout 30 --tools-timeout 15
 
-# Run a basic HTTP test suite
-python ./minimal_http_server/test_http_server.py
-
-# Run compliance tests against the HTTP server
-python -m mcp_testing.scripts.http_test --server-url http://localhost:8000 --protocol-version 2025-03-26
+# Focus on tools testing with dynamic discovery
+python -m mcp_testing.scripts.compliance_report --server-command "python path/to/server.py" --protocol-version 2025-03-26 --test-mode tools --dynamic-only
 ```
 
-See the [HTTP Server README](minimal_http_server/README.md) for more details.
+#### Testing Pip-Installed Servers
 
----
-
-## MCP Testing Framework
-
-A flexible framework for verifying MCP server compliance with protocol specifications.
-
-### Key Features
-
-- Support for both 2024-11-05 and 2025-03-26 protocol versions
-- Support for both STDIO and HTTP transport protocols
-- Dynamic tool testing that adapts to server capabilities
-- Detailed compliance reporting
-- Configurable test modes for targeted functionality testing
-- Comprehensive specification requirement testing (MUST, SHOULD, MAY)
-- Server configuration system for diverse implementations
-
-### Quick Start
-
-#### For STDIO Servers:
-
-```bash
-# Basic interaction - simplest test to verify server works
-python -m mcp_testing.scripts.basic_interaction --server-command "./minimal_mcp_server/minimal_mcp_server.py"
-
-# Run a full compliance test
-python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26
-```
-
-#### For HTTP Servers:
-
-```bash
-# Quick HTTP test
-python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
-
-# Simple connectivity check
-python minimal_http_server/check_server.py http://localhost:8000/mcp
-```
-
-### Testing Pip-Installed MCP Servers
-
-To test MCP servers installed via pip (like `mcp-server-fetch`):
-
-1. **Install in the same environment as the testing framework:**
+For servers installed via pip (like `mcp-server-fetch`):
 
 ```bash
 # Ensure you're in the correct virtual environment
 source .venv/bin/activate
 
-# Install the server package and dependencies
-pip install mcp-server-fetch sseclient-py==1.7.2  # For the fetch server example
+# Install the server and dependencies
+pip install your-mcp-server  # Replace with actual package name
+
+# Run compliance tests
+python -m mcp_testing.scripts.compliance_report --server-command "python -m your_server_module" --protocol-version 2024-11-05
+
+# Run tools-only tests
+python -m mcp_testing.scripts.compliance_report --server-command "python -m your_server_module" --protocol-version 2024-11-05 --test-mode tools
+
+# example brave search server
+BRAVE_API_KEY=api-key python -m mcp_testing.scripts.compliance_report --server-command "npx -y @modelcontextprotocol/server-brave-search" --protocol-version 2024-11-05 
 ```
 
-2. **Run tests with module-style command:**
+#### Test Configuration Options
+
+Common options for both types:
+
+- `--test-mode tools`: Focus on testing tool functionality
+- `--dynamic-only`: Automatically discover and test available tools
+- `--test-timeout 30`: Set timeout for regular tests (seconds)
+- `--tools-timeout 15`: Set timeout for tool-specific tests (seconds)
+- `--required-tools tool1,tool2`: Specify required tools to test
+- `--skip-tests test1,test2`: Skip specific tests
+- `--skip-async`: Skip async tool testing
+
+Note: Tool-related tests that timeout are treated as non-critical, allowing testing to continue.
+
+### Test Reports
+
+Each test run generates a detailed report containing:
+- Server information (command, protocol version)
+- Test execution timestamp
+- Test duration
+- Success rate
+- Detailed results for each test case
+- Server capabilities
+- Session information
+
+
+### Running Tests
+
+You can run different types of tests using module-style commands:
 
 ```bash
 # Basic interaction test
@@ -132,141 +104,58 @@ python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_
 
 # Compliance tests with tools-only mode
 python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-mode tools
-```
 
-3. **Handling timeout issues:**
-
-```bash
-# Set timeouts for tools tests vs. other tests
+# Set custom timeouts for tools tests vs. other tests
 python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-timeout 30 --tools-timeout 15
 ```
 
-Tool-related tests that timeout are treated as non-critical, allowing testing to continue.
+Note: Tool-related tests that timeout are treated as non-critical, allowing testing to continue.
 
-#### Troubleshooting Pip-Installed Servers
+## HTTP Compliance Testing
 
-- **"Failed to start transport" error**: Ensure server is installed in the same environment
-- **Module not found errors**: Verify module installation with `python -c "import module_name"`
-- **Dependency issues**: Install all required dependencies
-- **Hanging/timeout issues**: Use timeout parameters for appropriate values
+The validator includes a basic compliance testing suite for HTTP-based MCP servers.
 
-### Advanced Testing Options
-
-#### Server Configuration System
-
-The framework includes a configuration system for different server implementations:
-
-- **JSON Configuration Files**: Server-specific configurations in `mcp_testing/server_configs/`
-- **Auto-Detection**: Identifies servers based on command patterns
-- **Environment Management**: Manages required environment variables for each server
-
-Example usage:
+### Running HTTP Tests
 
 ```bash
-# Server requiring API keys
-API_KEY="your_key" python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server"
+# Start the reference HTTP server (runs on port 8088)
+python ref_http_server/reference_mcp_server.py
 
-# Using default values pattern
-MCP_DEFAULT_API_KEY="default_key" python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server"
+# Run compliance tests and generate a detailed report
+python -m mcp_testing.scripts.http_compliance_test --output-dir reports
 ```
 
-See [Server Configurations README](mcp_testing/server_configs/README.md) for details.
+### HTTP Test Coverage
 
-#### Transport-Specific Testing
+The HTTP compliance test suite verifies:
 
-**STDIO Testing:**
-
-```bash
-# Full compliance test
-python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26
-
-# Specification requirement tests only
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --spec-coverage-only --protocol-version 2025-03-26
-```
-
-**HTTP Testing:**
-
-```bash
-# Using the HTTP test script
-python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
-
-# Using the executable script
-./mcp_testing/bin/http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
-```
-
-#### Test Customization Options
-
-```bash
-# Skip async tests for older servers
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --skip-async
-
-# Test only dynamic tool capabilities
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --dynamic-only
-
-# Use specific subset of tests
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-mode tools
-
-# Skip tests known to fail
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --skip-tests "test_shutdown,test_exit_after_shutdown"
-
-# Auto-detect server capabilities and protocol version
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --auto-detect
-
-# Set custom timeouts
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-timeout 30 --tools-timeout 15
-
-# HTTP debug output
-python -m mcp_testing.scripts.http_test --server-url http://example.com/mcp --debug
-```
-
-#### Generating Compliance Reports
-
-```bash
-# STDIO server report
-python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26 --output-dir "./reports"
-
-# HTTP server report
-python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26 --output-dir "./reports"
-```
-
-Reports include:
-- Summary of test results
-- Detailed listing of passed and failed tests
-- Specification coverage metrics
-- Server capabilities overview
-- Compliance status and score
-
-#### Basic Testing
-
-For servers with potential issues:
-
-```bash
-# Verify server initialization and list tools
-python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
-```
-
-This script:
-- Starts the server
-- Sends initialization request
-- Verifies response
-- Lists tools (if server responds correctly)
-- Terminates gracefully
-
-Useful for initial verification and troubleshooting.
-
-### Running the Test Suite
-
-```bash
-# Run the entire test suite
-pytest
-
-# Run specific test modules
-pytest mcp_testing/tests/base_protocol/
-```
-
----
+1. Protocol Initialization
+2. Tools Functionality
+   - Echo command
+   - Add operation
+   - Sleep function (async capabilities)
+3. Error Handling
+4. Batch Request Processing
+5. Session Management
+6. Protocol Negotiation
+7. Ping Utility
 
 
+## Testing Scripts Overview
+
+The following scripts are available in `mcp_testing/scripts/`:
+
+### Active and Maintained
+- `http_compliance_test.py`: Primary script for HTTP server testing (7/7 tests passing)
+- `compliance_report.py`: Primary script for STDIO server testing (36/37 tests passing)
+
+### Supporting Scripts mixed working/in progress
+- `basic_interaction.py`: Simple tool for testing basic server functionality
+- `http_test.py`: Lower-level HTTP testing utilities
+- `http_compliance.py`: Core HTTP compliance testing logic
+- `http_compliance_report.py`: Report generation for HTTP tests
+- `run_stdio_tests.py`: Lower-level STDIO testing utilities
+- `session_test.py`: Session management testing utilities
 
 ## License
 

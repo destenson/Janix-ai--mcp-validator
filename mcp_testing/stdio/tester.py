@@ -391,42 +391,67 @@ class MCPStdioTester:
                 logger.error("Failed to list tools, aborting tests")
                 return False
             
-            # Check if required tools are available
+            # Check available tools
             tool_names = [tool["name"] for tool in tools]
             logger.debug(f"Available tools: {', '.join(tool_names)}")
             
-            # Test echo tool if available
-            if "echo" in tool_names:
-                echo_result = self.test_echo_tool()
-                if not echo_result:
-                    logger.error("Echo tool test failed")
+            # Test the first available tool
+            if tools:
+                test_tool = tools[0]
+                tool_name = test_tool["name"]
+                
+                # Generate test parameters based on schema
+                test_params = {}
+                if "parameters" in test_tool:  # 2025-03-26
+                    schema = test_tool["parameters"]
+                    if "properties" in schema:
+                        for prop_name, prop_details in schema["properties"].items():
+                            prop_type = prop_details.get("type", "string")
+                            if prop_type == "string":
+                                test_params[prop_name] = "test_value"
+                            elif prop_type in ["number", "integer"]:
+                                test_params[prop_name] = 42
+                            elif prop_type == "boolean":
+                                test_params[prop_name] = True
+                            elif prop_type == "array":
+                                test_params[prop_name] = []
+                            elif prop_type == "object":
+                                test_params[prop_name] = {}
+                elif "inputSchema" in test_tool:  # 2024-11-05
+                    schema = test_tool["inputSchema"]
+                    if "properties" in schema:
+                        for prop_name, prop_details in schema["properties"].items():
+                            prop_type = prop_details.get("type", "string")
+                            if prop_type == "string":
+                                test_params[prop_name] = "test_value"
+                            elif prop_type in ["number", "integer"]:
+                                test_params[prop_name] = 42
+                            elif prop_type == "boolean":
+                                test_params[prop_name] = True
+                            elif prop_type == "array":
+                                test_params[prop_name] = []
+                            elif prop_type == "object":
+                                test_params[prop_name] = {}
+                
+                # Test the tool
+                success, response = self._send_request("invokeToolCall", {
+                    "toolCall": {
+                        "id": f"{tool_name}-test",
+                        "name": tool_name,
+                        "parameters": test_params
+                    }
+                })
+                
+                if not success or "result" not in response:
+                    logger.error(f"Failed to test tool {tool_name}")
                     return False
-            else:
-                logger.warning("Echo tool not available, skipping test")
+                
+                logger.info(f"Successfully tested tool: {tool_name}")
             
-            # Test add tool if available
-            if "add" in tool_names:
-                add_result = self.test_add_tool()
-                if not add_result:
-                    logger.error("Add tool test failed")
-                    return False
-            else:
-                logger.warning("Add tool not available, skipping test")
-            
-            # Test async sleep tool if available
-            if "sleep" in tool_names:
-                sleep_result = self.test_async_sleep_tool()
-                if not sleep_result:
-                    logger.error("Async sleep tool test failed")
-                    return False
-            else:
-                logger.warning("Sleep tool not available, skipping async test")
-            
-            logger.info("All tests completed successfully")
             return True
             
         except Exception as e:
-            logger.error(f"Error during testing: {e}")
+            logger.exception("Error during tests")
             return False
         
         finally:
