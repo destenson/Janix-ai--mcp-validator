@@ -10,40 +10,54 @@ The MCP Protocol Validator provides a comprehensive environment for testing and 
 
 This repository contains:
 
-1. **Minimal MCP Server**: A reference implementation using STDIO transport
-2. **Minimal HTTP MCP Server**: A reference implementation using HTTP transport
-3. **MCP Testing Framework**: A comprehensive testing framework for verifying MCP server implementations
+1. **STDIO Reference Implementations**:
+   - 2024-11-05 protocol version
+   - 2025-03-26 protocol version
+2. **HTTP Reference Implementation**:
+   - HTTP transport with WebSockets for bidirectional communication
+3. **FastMCP HTTP SSE Implementation**:
+   - HTTP transport with SSE for efficient one-way streaming
+4. **MCP Testing Framework**: A comprehensive testing framework for verifying MCP server implementations
 
-The current implementation is fully compliant with the latest MCP protocol specification (2025-03-26).
+All implementations have been thoroughly tested against the MCP protocol specifications.
 
-✅ All tests pass for the reference implementations!
-
----
+## Compliance Testing Results
 
 ## Reference Implementations
 
-### Minimal MCP Server (STDIO)
+### STDIO Reference Implementations
 
-A simple reference implementation that uses STDIO for transport and supports:
+Two reference implementations using STDIO for transport:
+
+#### 2024-11-05 Protocol Version
+
+A simple reference implementation that supports:
 
 - Basic protocol operations (initialization, shutdown)
 - Synchronous tool calls
-- Asynchronous tool calls (for 2025-03-26)
-- Utility tools for file system operations
 
 ```bash
 # Run the server
-python ./minimal_mcp_server/minimal_mcp_server.py
+python ./ref_stdio_server/stdio_server_2024_11_05.py
+```
+
+#### 2025-03-26 Protocol Version
+
+An enhanced implementation with additional features:
+
+- Support for asynchronous tool calls
+- Resources capability
+
+```bash
+# Run the server
+python ./ref_stdio_server/stdio_server_2025_03_26.py
 ```
 
 #### Supported Tools
 
 - `echo`: Echo input text
 - `add`: Add two numbers
-- `sleep`: Sleep for specified seconds (useful for testing async operations)
-- `list_directory`: List files in a directory
-- `read_file`: Read a file
-- `write_file`: Write a file
+- `sleep`: Sleep for specified seconds (2025-03-26 version only)
 
 ### Minimal HTTP MCP Server
 
@@ -72,7 +86,59 @@ python -m mcp_testing.scripts.http_test --server-url http://localhost:8000 --pro
 
 See the [HTTP Server README](minimal_http_server/README.md) for more details.
 
----
+### FastMCP HTTP Server with SSE Transport
+
+A reference implementation using HTTP with Server-Sent Events (SSE) for asynchronous communication:
+
+- HTTP-based JSON-RPC 2.0 with SSE transport
+- Full compliance with MCP 2025-03-26 specification
+- Robust session and connection management
+- Support for asynchronous tool calls
+
+```bash
+# Run the server with default settings (localhost:8085)
+python ./ref_http_server/fastmcp_server.py --debug
+
+# Run compliance tests
+./test_improved_fastmcp.sh
+```
+
+#### Key Features
+
+- **SSE Transport**: Efficient one-way streaming from server to client
+- **Connection Management**: Keepalives, reconnection support, error handling
+- **Session Management**: Activity tracking, stale session cleanup
+- **HTTP Integration**: Works with standard proxies, CORS support
+
+#### Supported Tools
+
+- `echo`: Echo input text
+- `add`: Add two numbers
+- `sleep`: Sleep for specified seconds (demonstrates async capabilities)
+
+#### Implementation Details
+
+The server follows best practices for HTTP-based MCP:
+
+- Client sends JSON-RPC requests to `/mcp` endpoint
+- Server responds with 202 Accepted for async processing
+- Results are sent via SSE connection at `/notifications`
+- Client correlates responses using request IDs
+
+#### Testing the FastMCP Server
+
+The `test_improved_fastmcp.sh` script automates testing:
+- Starts the server
+- Runs compliance tests
+- Generates a detailed report
+- Cleans up server processes
+
+```bash
+# Run the full test suite
+./test_improved_fastmcp.sh
+```
+
+This implementation provides a lightweight alternative to WebSockets while maintaining full protocol compliance.
 
 ## MCP Testing Framework
 
@@ -93,21 +159,25 @@ A flexible framework for verifying MCP server compliance with protocol specifica
 #### For STDIO Servers:
 
 ```bash
-# Basic interaction - simplest test to verify server works
+# Basic interaction test
 python -m mcp_testing.scripts.basic_interaction --server-command "./minimal_mcp_server/minimal_mcp_server.py"
 
-# Run a full compliance test
+# Full compliance test
 python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26
 ```
 
 #### For HTTP Servers:
 
 ```bash
-# Quick HTTP test
+# HTTP test
 python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
+```
 
-# Simple connectivity check
-python minimal_http_server/check_server.py http://localhost:8000/mcp
+#### For HTTP with SSE Servers:
+
+```bash
+# FastMCP with SSE test
+./test_improved_fastmcp.sh
 ```
 
 ### Testing Pip-Installed MCP Servers
@@ -150,6 +220,14 @@ Tool-related tests that timeout are treated as non-critical, allowing testing to
 - **Dependency issues**: Install all required dependencies
 - **Hanging/timeout issues**: Use timeout parameters for appropriate values
 
+#### Troubleshooting FastMCP SSE Transport
+
+- **Connection issues**: Ensure no proxies or load balancers terminate idle connections
+- **Session ID errors**: Client must parse session ID from `Connected to session xxx` format
+- **Message delivery failures**: Verify the session ID is passed in all requests
+
+See the [FastMCP Server README](ref_http_server/README.md) for more details.
+
 ### Advanced Testing Options
 
 #### Server Configuration System
@@ -179,9 +257,6 @@ See [Server Configurations README](mcp_testing/server_configs/README.md) for det
 ```bash
 # Full compliance test
 python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26
-
-# Specification requirement tests only
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --spec-coverage-only --protocol-version 2025-03-26
 ```
 
 **HTTP Testing:**
@@ -189,50 +264,44 @@ python -m mcp_testing.scripts.compliance_report --server-command "/path/to/serve
 ```bash
 # Using the HTTP test script
 python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
-
-# Using the executable script
-./mcp_testing/bin/http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26
 ```
+
+**HTTP with SSE Transport Testing:**
+
+```bash
+# Using the FastMCP test script
+./test_improved_fastmcp.sh
+```
+
+The SSE transport implementation demonstrates an efficient alternative to WebSockets for MCP servers, with better compatibility with standard HTTP infrastructure and simpler client handling.
 
 #### Test Customization Options
 
 ```bash
-# Skip async tests for older servers
+# Skip async tests
 python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --skip-async
 
-# Test only dynamic tool capabilities
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --dynamic-only
-
-# Use specific subset of tests
+# Test only tools
 python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-mode tools
 
-# Skip tests known to fail
+# Skip specific tests
 python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --skip-tests "test_shutdown,test_exit_after_shutdown"
-
-# Auto-detect server capabilities and protocol version
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --auto-detect
 
 # Set custom timeouts
 python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-timeout 30 --tools-timeout 15
-
-# HTTP debug output
-python -m mcp_testing.scripts.http_test --server-url http://example.com/mcp --debug
 ```
 
 #### Generating Compliance Reports
 
 ```bash
-# STDIO server report (minimal_mcp_server example)
+# STDIO server report
 python -m mcp_testing.scripts.compliance_report --server-command "./minimal_mcp_server/minimal_mcp_server.py" --protocol-version 2025-03-26 --output-dir "./reports"
-
-# STDIO server report (ref_stdio_server 2024-11-05 example)
-python -m mcp_testing.scripts.compliance_report --server-command "./ref_stdio_server/stdio_server_2024_11_05.py" --protocol-version 2024-11-05 --output-dir "./reports"
-
-# STDIO server report (ref_stdio_server 2025-03-26 example)
-python -m mcp_testing.scripts.compliance_report --server-command "./ref_stdio_server/stdio_server_2025_03_26.py" --protocol-version 2025-03-26 --output-dir "./reports"
 
 # HTTP server report
 python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --protocol-version 2025-03-26 --output-dir "./reports"
+
+# FastMCP HTTP with SSE server report
+./test_improved_fastmcp.sh
 ```
 
 Reports include:
@@ -240,7 +309,6 @@ Reports include:
 - Detailed listing of passed and failed tests
 - Specification coverage metrics
 - Server capabilities overview
-- Compliance status and score
 
 #### Basic Testing
 
@@ -269,8 +337,6 @@ pytest
 # Run specific test modules
 pytest mcp_testing/tests/base_protocol/
 ```
-
----
 
 ## License
 
