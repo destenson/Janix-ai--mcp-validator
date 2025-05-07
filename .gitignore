@@ -12,6 +12,8 @@ htmlcov
 .coverage
 .pytest_cache/
 
+test-validation-wip.md
+
 # Virtual environment
 .venv/
 env/

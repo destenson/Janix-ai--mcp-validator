@@ -1,9 +1,0 @@
-{
-  "name": "Minimal MCP Server",
-  "identifiers": ["minimal_mcp_server.py", "minimal-mcp-server"],
-  "description": "Reference implementation of an MCP server with STDIO transport",
-  "environment": {},
-  "skip_tests": [],
-  "required_tools": ["echo", "add", "sleep", "list_directory", "read_file", "write_file"],
-  "recommended_protocol": "2025-03-26"
-} 
