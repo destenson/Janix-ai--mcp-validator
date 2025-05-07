@@ -56,52 +56,43 @@ class MCP2024_11_05Adapter(MCPProtocolAdapter):
         Raises:
             ConnectionError: If initialization fails
         """
-        if not client_capabilities:
-            client_capabilities = {}
-            
-        # Make sure the transport is started
-        if not self.transport.start():
-            raise ConnectionError("Failed to start transport")
-            
-        # Prepare the initialize request
+        if self.initialized:
+            return self.server_capabilities
+
+        # Build initialize request
         request = {
             "jsonrpc": "2.0",
             "id": "init",
             "method": "initialize",
             "params": {
                 "protocolVersion": self.version,
-                "capabilities": client_capabilities,
+                "capabilities": client_capabilities or {},
                 "clientInfo": {
-                    "name": "MCPTestingFramework",
+                    "name": "MCP Test Client",
                     "version": "1.0.0"
                 }
             }
         }
-        
-        # Send the initialize request
-        if self.debug:
-            print(f"Sending initialize request: {json.dumps(request)}")
-            
+
         try:
             response = self.transport.send_request(request)
-            
-            if self.debug:
-                print(f"Received initialize response: {json.dumps(response)}")
-                
-            if "error" in response:
-                raise ConnectionError(f"Initialization failed: {response['error']['message']}")
-                
-            # Extract and store server information
-            self.protocol_version = response.get("result", {}).get("protocolVersion")
-            self.server_capabilities = response.get("result", {}).get("capabilities", {})
-            self.server_info = response.get("result", {}).get("serverInfo", {})
-            
-            # Mark as initialized
+            if "result" not in response:
+                raise ConnectionError(f"Initialize failed: {response.get('error', {}).get('message', 'Unknown error')}")
+
+            result = response["result"]
+            self.server_capabilities = result.get("capabilities", {})
+            self.server_info = result.get("serverInfo", {})
+            self.protocol_version = result.get("protocolVersion")
+
+            # For 2024-11-05, capabilities are simple booleans
+            if isinstance(self.server_capabilities.get("tools"), bool):
+                self.server_capabilities["tools"] = {"supported": self.server_capabilities["tools"]}
+
             self.initialized = True
-            
-            return response.get("result", {})
+            return result
+
         except Exception as e:
-            raise ConnectionError(f"Initialization failed: {str(e)}")
+            raise ConnectionError(f"Initialize failed: {str(e)}")
     
     async def send_initialized(self) -> None:
         """
@@ -145,32 +136,31 @@ class MCP2024_11_05Adapter(MCPProtocolAdapter):
         if not self.initialized:
             raise ConnectionError("Cannot get tools list before initialization")
             
-        # Prepare the tools/list request
         request = {
             "jsonrpc": "2.0",
             "id": "tools_list",
-            "method": "tools/list",
-            "params": {}
+            "method": "tools/list"
         }
-        
-        # Send the request
-        if self.debug:
-            print(f"Sending tools/list request: {json.dumps(request)}")
-            
+
         try:
             response = self.transport.send_request(request)
+            if "result" not in response:
+                raise Exception(f"Failed to get tools list: {response.get('error', {}).get('message', 'Unknown error')}")
+
+            tools = response["result"].get("tools", [])
             
-            if self.debug:
-                print(f"Received tools/list response: {json.dumps(response)}")
-                
-            if "error" in response:
-                raise ConnectionError(f"Failed to get tools list: {response['error']['message']}")
-                
-            return response.get("result", {}).get("tools", [])
+            # For 2024-11-05, validate tool schema format
+            for tool in tools:
+                if "inputSchema" in tool and "parameters" not in tool:
+                    # Convert inputSchema to parameters format for consistency
+                    tool["parameters"] = tool["inputSchema"]
+                    
+            return tools
+
         except Exception as e:
-            raise ConnectionError(f"Failed to get tools list: {str(e)}")
+            raise Exception(f"Failed to get tools list: {str(e)}")
     
-    async def call_tool(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
         Call a tool on the server.
         
@@ -187,33 +177,24 @@ class MCP2024_11_05Adapter(MCPProtocolAdapter):
         if not self.initialized:
             raise ConnectionError("Cannot call tool before initialization")
             
-        # Prepare the tools/call request
         request = {
             "jsonrpc": "2.0",
             "id": "tool_call",
             "method": "tools/call",
             "params": {
-                "name": name,
+                "name": tool_name,
                 "arguments": arguments
             }
         }
-        
-        # Send the request
-        if self.debug:
-            print(f"Sending tools/call request: {json.dumps(request)}")
-            
+
         try:
             response = self.transport.send_request(request)
-            
-            if self.debug:
-                print(f"Received tools/call response: {json.dumps(response)}")
-                
-            if "error" in response:
-                raise ConnectionError(f"Tool call failed: {response['error']['message']}")
-                
-            return response.get("result", {})
+            if "result" not in response:
+                raise Exception(f"Tool call failed: {response.get('error', {}).get('message', 'Unknown error')}")
+            return response["result"]
+
         except Exception as e:
-            raise ConnectionError(f"Tool call failed: {str(e)}")
+            raise Exception(f"Tool call failed: {str(e)}")
     
     async def get_resources_list(self) -> List[Dict[str, Any]]:
         """

@@ -283,68 +283,91 @@ class McpHttpComplianceTest:
             
             tools = tools_list_data["result"]["tools"]
             
-            # Check if we have the basic required tools
+            # Store available tools
             tool_names = [tool.get("name") for tool in tools]
-            required_tools = ["echo"]
-            missing_tools = [tool for tool in required_tools if tool not in tool_names]
+            self.results["tools_functionality"] = {
+                "status": "success",
+                "available_tools": tool_names,
+                "count": len(tool_names)
+            }
             
-            if missing_tools:
-                logger.warning(f"Server missing recommended tools: {missing_tools}")
-            
-            # Try to call the echo tool if available
-            if "echo" in tool_names:
-                echo_message = f"Test message at {datetime.now().isoformat()}"
-                echo_payload = {
+            # Test the first available tool if any exist
+            if tools:
+                test_tool = tools[0]
+                tool_name = test_tool.get("name")
+                
+                # Generate test parameters based on schema
+                test_params = {}
+                if "parameters" in test_tool:  # 2025-03-26
+                    schema = test_tool["parameters"]
+                    if "properties" in schema:
+                        for prop_name, prop_details in schema["properties"].items():
+                            prop_type = prop_details.get("type", "string")
+                            if prop_type == "string":
+                                test_params[prop_name] = "test_value"
+                            elif prop_type in ["number", "integer"]:
+                                test_params[prop_name] = 42
+                            elif prop_type == "boolean":
+                                test_params[prop_name] = True
+                            elif prop_type == "array":
+                                test_params[prop_name] = []
+                            elif prop_type == "object":
+                                test_params[prop_name] = {}
+                elif "inputSchema" in test_tool:  # 2024-11-05
+                    schema = test_tool["inputSchema"]
+                    if "properties" in schema:
+                        for prop_name, prop_details in schema["properties"].items():
+                            prop_type = prop_details.get("type", "string")
+                            if prop_type == "string":
+                                test_params[prop_name] = "test_value"
+                            elif prop_type in ["number", "integer"]:
+                                test_params[prop_name] = 42
+                            elif prop_type == "boolean":
+                                test_params[prop_name] = True
+                            elif prop_type == "array":
+                                test_params[prop_name] = []
+                            elif prop_type == "object":
+                                test_params[prop_name] = {}
+                
+                tool_call_payload = {
                     "jsonrpc": "2.0",
                     "id": 3,
                     "method": "tools/call",
                     "params": {
-                        "name": "echo",
-                        "arguments": {
-                            "message": echo_message
-                        }
+                        "name": tool_name,
+                        "arguments": test_params
                     }
                 }
                 
-                echo_response = self.client.post(
+                tool_response = self.client.post(
                     url,
-                    json=echo_payload,
+                    json=tool_call_payload,
                     headers=headers
                 )
                 
-                if echo_response.status_code != 200:
-                    self.results["tools_functionality"] = {
+                if tool_response.status_code != 200:
+                    self.results["tools_functionality"].update({
                         "status": "failed",
-                        "error": f"echo tool call expected 200 status, got {echo_response.status_code}",
-                        "response": echo_response.text
-                    }
+                        "error": f"Tool call expected 200 status, got {tool_response.status_code}",
+                        "response": tool_response.text
+                    })
                     return False
                 
-                echo_data = echo_response.json()
+                tool_data = tool_response.json()
                 
-                if "result" not in echo_data:
-                    self.results["tools_functionality"] = {
+                if "result" not in tool_data:
+                    self.results["tools_functionality"].update({
                         "status": "failed",
-                        "error": "echo tool response missing 'result'",
-                        "response": echo_data
-                    }
+                        "error": "Tool response missing 'result'",
+                        "response": tool_data
+                    })
                     return False
                 
-                echo_result = echo_data["result"]
-                
-                if "output" not in echo_result or echo_result["output"] != echo_message:
-                    self.results["tools_functionality"] = {
-                        "status": "failed",
-                        "error": f"Echo tool output mismatch: sent '{echo_message}', received '{echo_result.get('output')}'",
-                        "response": echo_data
-                    }
-                    return False
-            
-            self.results["tools_functionality"] = {
-                "status": "success",
-                "available_tools": tool_names,
-                "echo_test": "echo" in tool_names
-            }
+                # Store successful tool test result
+                self.results["tools_functionality"].update({
+                    "tested_tool": tool_name,
+                    "test_status": "success"
+                })
             
             return True
         

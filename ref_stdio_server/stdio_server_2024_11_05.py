@@ -30,13 +30,25 @@ DEBUG = os.environ.get("MCP_DEBUG", "").lower() in ("1", "true", "yes")
 if DEBUG:
     logger.setLevel(logging.DEBUG)
 
+class MethodNotFoundError(Exception):
+    """Raised when a method is not found."""
+    pass
+
+class InvalidParamsError(Exception):
+    """Raised when parameters are invalid."""
+    pass
+
 class MCPServer2024_11_05:
     """MCP 2024-11-05 protocol server implementation."""
     
     def __init__(self):
         """Initialize the server."""
         self.running = True
+        self.initialized = False
         self.client_capabilities = {}
+        self.server_capabilities = {
+            "tools": True  # Simple boolean for 2024-11-05
+        }
         
         logger.info(f"MCP 2024-11-05 STDIO Server initializing")
     
@@ -217,7 +229,7 @@ class MCPServer2024_11_05:
         }
 
     def handle_tools_list(self) -> Dict[str, Any]:
-        """Handle the mcp/tools method."""
+        """Handle the tools/list method."""
         tools = [
             {
                 "name": "echo",
@@ -231,14 +243,6 @@ class MCPServer2024_11_05:
                         }
                     },
                     "required": ["text"]
-                },
-                "outputSchema": {  # Using outputSchema for 2024-11-05
-                    "type": "object",
-                    "properties": {
-                        "echo": {
-                            "type": "string"
-                        }
-                    }
                 }
             },
             {
@@ -257,14 +261,6 @@ class MCPServer2024_11_05:
                         }
                     },
                     "required": ["a", "b"]
-                },
-                "outputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "sum": {
-                            "type": "number"
-                        }
-                    }
                 }
             }
         ]
@@ -297,24 +293,28 @@ class MCPServer2024_11_05:
             if arg not in arguments:
                 raise InvalidParamsError(f"Missing required argument: {arg}")
                 
-        # Call the appropriate tool function
+        # Call the appropriate tool function and format response according to 2024-11-05 spec
         if tool_name == "echo":
-            result = {"echo": arguments["text"]}
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": arguments["text"]
+                    }
+                ]
+            }
         elif tool_name == "add":
-            result = {"sum": float(arguments["a"]) + float(arguments["b"])}
+            result = float(arguments["a"]) + float(arguments["b"])
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": str(result)
+                    }
+                ]
+            }
         else:
             raise InvalidParamsError(f"Tool not implemented: {tool_name}")
-            
-        # Wrap the result in a content property
-        return {"content": result}
-
-class MethodNotFoundError(Exception):
-    """Raised when a method is not found."""
-    pass
-
-class InvalidParamsError(Exception):
-    """Raised when parameters are invalid."""
-    pass
 
 def main():
     """Main entry point."""

@@ -56,6 +56,57 @@ The STDIO compliance tests verify:
 3. Error Handling
 4. Protocol Version Negotiation
 
+### Testing Different STDIO Server Types
+
+The validator supports testing any STDIO-based MCP server, whether it's run directly from a command or installed via pip. Here's how to test different types of servers:
+
+#### Direct Command Testing
+
+For servers that run directly from a Python file or command:
+
+```bash
+# Test a local Python file
+python -m mcp_testing.scripts.compliance_report --server-command "python path/to/your/server.py" --protocol-version 2025-03-26
+
+# Test with specific timeouts
+python -m mcp_testing.scripts.compliance_report --server-command "python path/to/server.py" --protocol-version 2025-03-26 --test-timeout 30 --tools-timeout 15
+
+# Focus on tools testing with dynamic discovery
+python -m mcp_testing.scripts.compliance_report --server-command "python path/to/server.py" --protocol-version 2025-03-26 --test-mode tools --dynamic-only
+```
+
+#### Testing Pip-Installed Servers
+
+For servers installed via pip (like `mcp-server-fetch`):
+
+```bash
+# Ensure you're in the correct virtual environment
+source .venv/bin/activate
+
+# Install the server and dependencies
+pip install your-mcp-server  # Replace with actual package name
+
+# Run compliance tests
+python -m mcp_testing.scripts.compliance_report --server-command "python -m your_server_module" --protocol-version 2024-11-05
+
+# Run tools-only tests
+python -m mcp_testing.scripts.compliance_report --server-command "python -m your_server_module" --protocol-version 2024-11-05 --test-mode tools
+```
+
+#### Test Configuration Options
+
+Common options for both types:
+
+- `--test-mode tools`: Focus on testing tool functionality
+- `--dynamic-only`: Automatically discover and test available tools
+- `--test-timeout 30`: Set timeout for regular tests (seconds)
+- `--tools-timeout 15`: Set timeout for tool-specific tests (seconds)
+- `--required-tools tool1,tool2`: Specify required tools to test
+- `--skip-tests test1,test2`: Skip specific tests
+- `--skip-async`: Skip async tool testing
+
+Note: Tool-related tests that timeout are treated as non-critical, allowing testing to continue.
+
 ### Test Reports
 
 Each test run generates a detailed report containing:
@@ -66,6 +117,48 @@ Each test run generates a detailed report containing:
 - Detailed results for each test case
 - Server capabilities
 - Session information
+
+## Testing Pip-Installed MCP Servers
+
+The validator supports testing MCP servers that are installed via pip. Here's how to test pip-installed servers like `mcp-server-fetch`:
+
+### Installation and Setup
+
+First, ensure you're working in the correct virtual environment and install the server:
+
+```bash
+# Activate your virtual environment
+source .venv/bin/activate
+
+# Install the server package and dependencies
+pip install mcp-server-fetch sseclient-py==1.7.2  # For the fetch server example
+```
+
+### Running Tests
+
+You can run different types of tests using module-style commands:
+
+```bash
+# Basic interaction test
+python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+
+# Compliance tests with tools-only mode
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-mode tools
+
+# Set custom timeouts for tools tests vs. other tests
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-timeout 30 --tools-timeout 15
+```
+
+Note: Tool-related tests that timeout are treated as non-critical, allowing testing to continue.
+
+### Troubleshooting
+
+Common issues and solutions when testing pip-installed servers:
+
+- **"Failed to start transport" error**: Ensure the server is installed in the same environment as the testing framework
+- **Module not found errors**: Verify module installation with `python -c "import module_name"`
+- **Dependency issues**: Make sure all required dependencies are installed
+- **Hanging/timeout issues**: Adjust timeout parameters to appropriate values for your environment
 
 ## Testing Scripts Overview
 
@@ -82,8 +175,6 @@ The following scripts are available in `mcp_testing/scripts/`:
 - `http_compliance_report.py`: Report generation for HTTP tests
 - `run_stdio_tests.py`: Lower-level STDIO testing utilities
 - `session_test.py`: Session management testing utilities
-
-```
 
 ## License
 
