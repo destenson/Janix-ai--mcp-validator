@@ -1,84 +1,87 @@
-# Contributing to MCP Protocol Validator
+# Contributing to MCP Validator
 
-Thank you for considering contributing to the MCP Protocol Validator! This document provides guidelines and instructions for contributing to this project.
+Thank you for your interest in contributing to the MCP Validator project! This guide will help you get started with the development environment and understand our workflow.
 
-## Code of Conduct
+## Getting Started
 
-Please be respectful and considerate of others when contributing to this project. Any form of harassment or disrespectful behavior will not be tolerated.
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/mcp-validator.git
+   cd mcp-validator
+   ```
 
-## How to Contribute
+2. **Set up a virtual environment**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
 
-### Reporting Issues
+3. **Explore the codebase**
+   - See `README.md` for an overview
+   - Check `test_procedures.md` for how to run tests
+   - Review `report.md` for the current state of the project
 
-If you find a bug or have a suggestion for improvement:
+## Repository Structure
 
-1. Check if the issue already exists in the [GitHub Issues](https://github.com/Janix-ai/mcp-protocol-validator/issues)
-2. If not, create a new issue using the appropriate template
-3. Provide as much detail as possible, including steps to reproduce, expected behavior, and your environment
+- `mcp_testing/`: Core testing framework
+  - `protocols/`: Protocol version adapters
+  - `transports/`: Transport adapters (HTTP, STDIO)
+  - `scripts/`: Test scripts and utilities
+  - `utils/`: Shared utilities
 
-### Submitting Changes
+- `ref_stdio_server/`: Reference STDIO server implementations
+  - `stdio_server_2024_11_05.py`: 2024-11-05 protocol version
+  - `stdio_server_2025_03_26.py`: 2025-03-26 protocol version
 
-1. Fork the repository
-2. Create a new branch for your changes (`git checkout -b feature/your-feature-name`)
-3. Make your changes
-4. Run tests to ensure your changes don't break existing functionality
-5. Commit your changes with a descriptive commit message
-6. Push your branch to your fork
-7. Submit a pull request to the main repository
+- `ref_http_server/`: HTTP server with SSE transport
+  - `fastmcp_server.py`: Main server implementation
 
-### Pull Request Process
+- `reports/`: Generated test reports
+- `schema/`: JSON schema definitions
+- `archive/`: Deprecated code (kept for reference)
 
-1. Ensure your code follows the project's coding style
-2. Update documentation as necessary
-3. Include tests for new functionality
-4. Link any relevant issues in your pull request description
-5. Your pull request will be reviewed by maintainers who may request changes
+## Workflow
 
-## Development Setup
+1. **Check the TODO list**
+   - See `TODO.md` for current tasks and priorities
 
-1. Clone the repository
-2. Create a virtual environment: `python -m venv .venv`
-3. Activate the virtual environment:
-   - Windows: `.venv\Scripts\activate`
-   - Unix/MacOS: `source .venv/bin/activate`
-4. Install dependencies: `pip install -r requirements.txt`
-5. Run tests: `pytest`
+2. **Create a feature branch**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
 
-## Testing
+3. **Develop and test**
+   - Follow the test procedures in `test_procedures.md`
+   - Ensure all tests pass before submitting a PR
 
-All changes should include appropriate tests:
+4. **Submit a pull request**
+   - Include a clear description of your changes
+   - Reference any related issues
 
-- Unit tests for utility functions
-- Integration tests for protocol handling
-- End-to-end tests for server interaction
+## Testing Guidelines
 
-Run the test suite with `pytest` before submitting changes.
+- All new code should have accompanying tests
+- Run both HTTP and STDIO tests to ensure full compatibility
+- Generate compliance reports to verify specification adherence
 
-## Adding New Features
+## Code Style
 
-### Supporting New Protocol Versions
+- Follow PEP 8 guidelines for Python code
+- Use clear, descriptive variable and function names
+- Add docstrings to all functions and classes
+- Keep lines to a reasonable length (120 characters max)
 
-To add support for a new MCP protocol version:
+## Documentation
 
-1. Create a new protocol adapter in `mcp_testing/protocols/`
-2. Update the test cases to include tests for the new protocol version
-3. Update the server implementations to support the new protocol
+- Update README.md when adding new features
+- Keep documentation in sync with code changes
+- Document public APIs with clear examples
 
-### Adding New Transport Mechanisms
+## Need Help?
 
-To add support for a new transport mechanism:
+- Check the existing documentation
+- Review test reports for insights
+- File an issue for questions or problems
 
-1. Create a new transport adapter in `mcp_testing/transports/`
-2. Implement the required interface methods
-3. Add tests for the new transport mechanism
-
-## Style Guide
-
-- Follow PEP 8 for Python code
-- Use descriptive variable names
-- Include docstrings for all modules, classes, and functions
-- Keep functions small and focused on a single responsibility
-
-## License
-
-By contributing to this project, you agree that your contributions will be licensed under the project's AGPL-3.0 license. 
+Thank you for contributing to the MCP Validator project! 
