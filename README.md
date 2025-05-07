@@ -6,34 +6,6 @@ A testing suite and reference implementation for the [Model Context Protocol (MC
 
 The MCP Protocol Validator provides a comprehensive environment for testing and validating MCP server implementations. It includes reference implementations and a testing framework to ensure compliance with the MCP specification.
 
-## HTTP Compliance Testing
-
-The validator includes a comprehensive compliance testing suite for HTTP-based MCP servers.
-
-### Running HTTP Tests
-
-```bash
-# Start the reference HTTP server (runs on port 8088)
-python ref_http_server/reference_mcp_server.py
-
-# Run compliance tests and generate a detailed report
-python -m mcp_testing.scripts.http_compliance_test --output-dir reports
-```
-
-### HTTP Test Coverage
-
-The HTTP compliance test suite verifies:
-
-1. Protocol Initialization
-2. Tools Functionality
-   - Echo command
-   - Add operation
-   - Sleep function (async capabilities)
-3. Error Handling
-4. Batch Request Processing
-5. Session Management
-6. Protocol Negotiation
-7. Ping Utility
 
 ## STDIO Compliance Testing
 
@@ -91,6 +63,9 @@ python -m mcp_testing.scripts.compliance_report --server-command "python -m your
 
 # Run tools-only tests
 python -m mcp_testing.scripts.compliance_report --server-command "python -m your_server_module" --protocol-version 2024-11-05 --test-mode tools
+
+# example brave search server
+BRAVE_API_KEY=api-key python -m mcp_testing.scripts.compliance_report --server-command "npx -y @modelcontextprotocol/server-brave-search" --protocol-version 2024-11-05 
 ```
 
 #### Test Configuration Options
@@ -118,21 +93,6 @@ Each test run generates a detailed report containing:
 - Server capabilities
 - Session information
 
-## Testing Pip-Installed MCP Servers
-
-The validator supports testing MCP servers that are installed via pip. Here's how to test pip-installed servers like `mcp-server-fetch`:
-
-### Installation and Setup
-
-First, ensure you're working in the correct virtual environment and install the server:
-
-```bash
-# Activate your virtual environment
-source .venv/bin/activate
-
-# Install the server package and dependencies
-pip install mcp-server-fetch sseclient-py==1.7.2  # For the fetch server example
-```
 
 ### Running Tests
 
@@ -151,14 +111,35 @@ python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_
 
 Note: Tool-related tests that timeout are treated as non-critical, allowing testing to continue.
 
-### Troubleshooting
+## HTTP Compliance Testing
 
-Common issues and solutions when testing pip-installed servers:
+The validator includes a basic compliance testing suite for HTTP-based MCP servers.
 
-- **"Failed to start transport" error**: Ensure the server is installed in the same environment as the testing framework
-- **Module not found errors**: Verify module installation with `python -c "import module_name"`
-- **Dependency issues**: Make sure all required dependencies are installed
-- **Hanging/timeout issues**: Adjust timeout parameters to appropriate values for your environment
+### Running HTTP Tests
+
+```bash
+# Start the reference HTTP server (runs on port 8088)
+python ref_http_server/reference_mcp_server.py
+
+# Run compliance tests and generate a detailed report
+python -m mcp_testing.scripts.http_compliance_test --output-dir reports
+```
+
+### HTTP Test Coverage
+
+The HTTP compliance test suite verifies:
+
+1. Protocol Initialization
+2. Tools Functionality
+   - Echo command
+   - Add operation
+   - Sleep function (async capabilities)
+3. Error Handling
+4. Batch Request Processing
+5. Session Management
+6. Protocol Negotiation
+7. Ping Utility
+
 
 ## Testing Scripts Overview
 
