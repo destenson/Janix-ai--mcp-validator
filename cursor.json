@@ -1,0 +1,35 @@
+{
+  "rules": {
+    "staged-coding": {
+      "description": "Generate code in collaborative stages rather than all at once",
+      "stages": ["skeleton", "implementation", "validation", "refinement"],
+      "enabled": true
+    },
+    "explain-first": {
+      "description": "Require explanation of approach before generating any code",
+      "required": true
+    },
+    "mcp-documentation": {
+      "description": "Link to relevant MCP protocol documentation for each test",
+      "format": "See MCP spec section {section} at {url}"
+    },
+    "test-template": {
+      "description": "Follow consistent template for all test implementations",
+      "sections": ["purpose", "setup", "execution", "validation", "cleanup"]
+    },
+    "complexity-check": {
+      "description": "Flag potentially complex implementations for review",
+      "threshold": "medium",
+      "action": "request-confirmation"
+    },
+    "provide-alternatives": {
+      "description": "Suggest multiple implementation approaches",
+      "count": "2-3",
+      "compare": ["readability", "performance", "maintainability"]
+    },
+    "break-down-tasks": {
+      "description": "Break implementation into explicit sub-tasks",
+      "format": "Step {number}: {description}"
+    }
+  }
+}

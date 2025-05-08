@@ -13,6 +13,8 @@ htmlcov
 .pytest_cache/
 
 test-validation-wip.md
+.cursor.json
+mco_testing/.cursor-rules
 
 # Virtual environment
 .venv/

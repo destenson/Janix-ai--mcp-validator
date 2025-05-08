@@ -1,0 +1,3 @@
+# MCP Validation Tests
+/tests/mcp_validation/**/*.js
+rules: staged-coding, explain-first, mcp-documentation, test-template
