@@ -1,3 +1,6 @@
+GOWTHAM_README.md
+
+
 # Byte-compiled / cache
 __pycache__/
 *.py[cod]
@@ -13,6 +16,8 @@ htmlcov
 .pytest_cache/
 
 test-validation-wip.md
+.cursor.json
+mco_testing/.cursor-rules
 
 # Virtual environment
 .venv/

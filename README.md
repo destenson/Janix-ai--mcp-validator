@@ -105,8 +105,19 @@ python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_
 # Compliance tests with tools-only mode
 python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-mode tools
 
+<<<<<<< Updated upstream
 # Set custom timeouts for tools tests vs. other tests
 python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-timeout 30 --tools-timeout 15
+=======
+# Test only specific functionality
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-mode tools
+
+# Skip async tests if experiencing hanging issues
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --skip-async
+
+# HTTP debug output
+python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --debug
+>>>>>>> Stashed changes
 ```
 
 Note: Tool-related tests that timeout are treated as non-critical, allowing testing to continue.

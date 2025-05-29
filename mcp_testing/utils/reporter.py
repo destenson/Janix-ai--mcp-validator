@@ -103,7 +103,12 @@ def generate_markdown_report(results: Dict[str, Any], server_command: str, proto
     ]
     
     # Add server metadata
-    metadata = {"Server": display_name, "Version": protocol_version, "Date": date_str}
+    metadata = {
+        "Server": display_name,
+        "Version": protocol_version,
+        "Date": date_str,
+        "Validator": "Janix MCP Validator"  # Add full validator name
+    }
     
     # Extract additional metadata from server config
     if server_config and isinstance(server_config, dict):

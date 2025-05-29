@@ -552,6 +552,7 @@ async def main():
             "server": server_name,
             "protocol_version": args.protocol_version,
             "timestamp": timestamp,
+            "validator": "Janix",  # Add Janix as the validator
             "total_tests": total_tests,
             "passed_tests": passed_tests,
             "failed_tests": failed_tests,
@@ -577,6 +578,7 @@ async def main():
             f"- **Server Command**: `{full_server_command}`",
             f"- **Protocol Version**: {args.protocol_version}",
             f"- **Test Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"- **Validator**: Janix",  # Add Janix as the validator
             ""
         ]
         
