@@ -117,7 +117,13 @@ class McpReferenceServer:
         self.register_tool(
             name="echo",
             description="Echo a message back to the client.",
-            parameters={"message": {"type": "string", "description": "Message to echo back"}},
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "Message to echo back"}
+                },
+                "required": ["message"]
+            },
             returns={"type": "string", "description": "The echoed message"},
             handler=self._echo_tool
         )
@@ -126,8 +132,12 @@ class McpReferenceServer:
             name="add",
             description="Add two numbers and return the result.",
             parameters={
-                "a": {"type": "number", "description": "First number"},
-                "b": {"type": "number", "description": "Second number"}
+                "type": "object",
+                "properties": {
+                    "a": {"type": "number", "description": "First number"},
+                    "b": {"type": "number", "description": "Second number"}
+                },
+                "required": ["a", "b"]
             },
             returns={"type": "number", "description": "Sum of a and b"},
             handler=self._add_tool
@@ -137,7 +147,11 @@ class McpReferenceServer:
             name="sleep",
             description="Sleep for the specified number of seconds.",
             parameters={
-                "seconds": {"type": "number", "description": "Number of seconds to sleep"}
+                "type": "object",
+                "properties": {
+                    "seconds": {"type": "number", "description": "Number of seconds to sleep"}
+                },
+                "required": ["seconds"]
             },
             returns={"type": "string", "description": "Confirmation message"},
             handler=self._sleep_tool
