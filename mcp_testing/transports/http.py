@@ -22,6 +22,11 @@ import uuid
 from mcp_testing.transports.base import MCPTransportAdapter
 
 
+class TransportError(Exception):
+    """Exception raised for transport-related errors."""
+    pass
+
+
 class HttpTransportAdapter(MCPTransportAdapter):
     """Transport adapter for HTTP-based MCP servers."""
     
@@ -180,37 +185,51 @@ class HttpTransportAdapter(MCPTransportAdapter):
                     
             # Verify connectivity with an initialize request
             self.logger.debug(f"Verifying connectivity to {self.server_url}")
+            
+            # Use the proper protocol version format for the request
+            protocol_version = self.protocol_version or "2025-06-18"
+            
             init_request = {
                 "jsonrpc": "2.0",
                 "method": "initialize",
                 "id": "connection-test",
                 "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {
+                    "client_info": {
                         "name": "MCPTestingFramework",
                         "version": "1.0.0"
+                    },
+                    "client_capabilities": {
+                        "protocol_versions": [protocol_version]
                     }
                 }
             }
+            # Create headers for initialization request
+            init_headers = self.headers.copy()
+            if self.protocol_version == "2025-06-18":
+                init_headers["MCP-Protocol-Version"] = self.protocol_version
+            
             response = self.session.post(
-                self.server_url,
+                urljoin(self.server_url, "/messages"),
                 json=init_request,
-                headers=self.headers,
+                headers=init_headers,
                 timeout=self.timeout
             )
             response.raise_for_status()
             
             # Extract session ID from response
             response_json = response.json()
-            self.session_id = self._extract_session_id(response, response_json)
-            if self.session_id:
-                self.headers["Mcp-Session-Id"] = self.session_id
+            session_id = self._extract_session_id(response, response_json)
+            if session_id:
+                self.session_id = session_id
+                self.headers["Mcp-Session-Id"] = session_id
             
-            # Send initialized notification
+            # Mark as started before sending initialized notification
+            self.is_started = True
+            
+            # Send initialized notification with the session ID we just received
             init_notification = {
                 "jsonrpc": "2.0",
-                "method": "initialized",
+                "method": "notifications/initialized",
                 "params": {}
             }
             self.send_notification(init_notification)
@@ -219,8 +238,6 @@ class HttpTransportAdapter(MCPTransportAdapter):
             self._should_stop = False
             loop = asyncio.get_event_loop()
             self._notification_task = loop.create_task(self._notification_listener())
-            
-            self.is_started = True
             return True
             
         except Exception as e:
@@ -470,18 +487,16 @@ class HttpTransportAdapter(MCPTransportAdapter):
             }
     
     def _extract_session_id(self, response: requests.Response, response_json: Dict[str, Any]) -> Optional[str]:
-        """Extract session ID from response headers or body."""
-        # First try headers (case-insensitive)
-        for header in response.headers:
-            if header.lower() == "mcp-session-id":
-                return response.headers[header]
-        
-        # Then try response body
+        """Extract session ID from response body or headers."""
+        # First try response body (this is the authoritative source)
         if isinstance(response_json, dict):
-            # Try result.session.id path
+            # Try result.session_id path (2025-06-18 format)
             if "result" in response_json:
                 result = response_json["result"]
                 if isinstance(result, dict):
+                    if "session_id" in result:
+                        return result["session_id"]
+                    # Fallback to legacy session.id path
                     if "session" in result and isinstance(result["session"], dict):
                         if "id" in result["session"]:
                             return result["session"]["id"]
@@ -489,6 +504,14 @@ class HttpTransportAdapter(MCPTransportAdapter):
             # Try direct sessionId field
             if "sessionId" in response_json:
                 return response_json["sessionId"]
+        
+        # Fallback to headers (case-insensitive) - but only server-sent headers
+        for header in response.headers:
+            if header.lower() == "mcp-session-id":
+                # Only use header if it's different from what we sent (i.e., server-generated)
+                header_value = response.headers[header]
+                if header_value != self.session_id:
+                    return header_value
         
         return None
 
@@ -523,9 +546,14 @@ class HttpTransportAdapter(MCPTransportAdapter):
         self.logger.debug(f"Headers: {headers}")
         
         try:
+            # Build URL with session ID for non-initialization requests
+            url = urljoin(self.server_url, "/messages")
+            if method != "initialize" and self.session_id:
+                url += f"?session_id={self.session_id}"
+            
             # Send request with retry handling
             response = self.session.post(
-                self.server_url,
+                url,
                 json=request,
                 headers=headers,
                 timeout=self.timeout
@@ -618,9 +646,14 @@ class HttpTransportAdapter(MCPTransportAdapter):
             if self.protocol_version == "2025-06-18":
                 headers["MCP-Protocol-Version"] = self.protocol_version
             
+            # Build URL with session ID for notifications
+            url = urljoin(self.server_url, "/messages")
+            if self.session_id:
+                url += f"?session_id={self.session_id}"
+            
             # Send the HTTP request (no response expected)
             response = self.session.post(
-                self.server_url,
+                url,
                 json=notification,
                 headers=headers,
                 timeout=self.timeout
@@ -667,9 +700,14 @@ class HttpTransportAdapter(MCPTransportAdapter):
             if self.protocol_version == "2025-06-18":
                 headers["MCP-Protocol-Version"] = self.protocol_version
             
+            # Build URL with session ID for batch requests
+            url = urljoin(self.server_url, "/messages")
+            if self.session_id:
+                url += f"?session_id={self.session_id}"
+            
             # Send the HTTP request
             response = self.session.post(
-                self.server_url,
+                url,
                 json=requests,
                 headers=headers,
                 timeout=self.timeout

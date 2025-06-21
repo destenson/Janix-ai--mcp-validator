@@ -615,7 +615,7 @@ async def handle_post_message(request: Request,
         body = await request.json()
         
         # Handle the message
-        response = await server.handle_message(body, session_id)
+        response = await mcp_server.handle_message(body, session_id)
         
         # Add session ID to response headers if available
         if hasattr(response, 'headers') and session_id:
@@ -674,7 +674,7 @@ async def handle_get_message(request: Request,
     
     # Validate session exists
     try:
-        server.get_session(session_id)
+        mcp_server.get_session(session_id)
     except HTTPException as e:
         if e.status_code == 404:
             return JSONResponse(

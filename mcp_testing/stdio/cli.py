@@ -18,7 +18,7 @@ from .utils import check_command_exists, verify_python_server
 from mcp_testing.report import generate_report
 
 
-def run_stdio_tester(server_command, args=None, debug=False, protocol_version="2025-03-26"):
+def run_stdio_tester(server_command, args=None, debug=False, protocol_version="2025-06-18"):
     """
     Run the STDIO tester against a server.
     
