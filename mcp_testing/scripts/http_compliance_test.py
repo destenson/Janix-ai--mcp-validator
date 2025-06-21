@@ -4,7 +4,7 @@ MCP HTTP Compliance Test
 
 A comprehensive test suite for validating MCP HTTP servers against the specification.
 This test script verifies that HTTP servers implement the protocol correctly according
-to the 2025-03-26 specification.
+to the 2025-06-18 specification.
 """
 
 import argparse
@@ -36,7 +36,7 @@ class McpHttpComplianceTest:
         self.client = httpx.Client(follow_redirects=True)
         self.session_id = None
         self.results = {}
-        self.protocol_version = "2025-03-26"  # Default protocol version
+        self.protocol_version = "2025-06-18"  # Default protocol version
         self.test_start_time = None
         
         if debug:
@@ -522,6 +522,30 @@ class McpHttpComplianceTest:
                 headers=headers
             )
             
+            # In 2025-06-18, batch requests should be rejected
+            if self.protocol_version == "2025-06-18":
+                if batch_response.status_code == 400:
+                    # Check that the error message mentions batching not supported
+                    try:
+                        error_data = batch_response.json()
+                        error_message = error_data.get("error", {}).get("message", "")
+                        if "batch" in error_message.lower() and "not supported" in error_message.lower():
+                            self.results["batch_requests"] = {
+                                "status": "success",
+                                "note": "Batch requests correctly rejected for 2025-06-18"
+                            }
+                            return True
+                    except:
+                        pass
+                
+                self.results["batch_requests"] = {
+                    "status": "failed",
+                    "error": f"2025-06-18 should reject batch requests with 400 status, got {batch_response.status_code}",
+                    "response": batch_response.text
+                }
+                return False
+            
+            # For older protocol versions, batch requests should work
             if batch_response.status_code != 200:
                 self.results["batch_requests"] = {
                     "status": "failed",

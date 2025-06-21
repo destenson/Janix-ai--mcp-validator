@@ -208,30 +208,40 @@ class McpReferenceServer:
         """Handle initialize request from client."""
         # Validate protocol compatibility
         client_protocols = params.client_capabilities.protocol_versions
-        compatible = any(proto in self.protocol_versions for proto in client_protocols)
         
-        if not compatible:
+        # Find the highest mutually supported protocol version
+        # Order matters: prefer newer versions
+        version_priority = ["2025-06-18", "2025-03-26", "2024-11-05"]
+        selected_version = None
+        
+        for version in version_priority:
+            if version in client_protocols and version in self.protocol_versions:
+                selected_version = version
+                break
+        
+        if not selected_version:
             raise HTTPException(
                 status_code=400,
-                detail=f"Incompatible protocol versions. Server supports: {self.protocol_versions}"
+                detail=f"Incompatible protocol versions. Server supports: {self.protocol_versions}, Client supports: {client_protocols}"
             )
         
         # Create new session
         session_id = str(uuid.uuid4())
         
-        # Store session information
+        # Store session information with negotiated protocol
         self.sessions[session_id] = {
             "created_at": datetime.now().isoformat(),
             "client_info": params.client_info.model_dump(),
+            "protocol_version": selected_version,
             "last_activity": datetime.now().isoformat(),
         }
         
-        logger.info(f"Created new session: {session_id}")
+        logger.info(f"Created new session: {session_id} with protocol {selected_version}")
         
         # Return session ID and server capabilities
         return InitializeResult(
             session_id=session_id,
-            protocol_version=self.protocol_versions[0],  # Use first supported version
+            protocol_version=selected_version,  # Use negotiated version
             server_info={
                 "name": self.name,
                 "version": "1.0.0"
@@ -255,10 +265,11 @@ class McpReferenceServer:
     
     async def list_tools(self, session_id: str) -> List[ToolDescription]:
         """List available tools."""
-        # Validate session
-        self.get_session(session_id)
+        # Validate session and get protocol version
+        session = self.get_session(session_id)
+        session_protocol = session.get("protocol_version", "2024-11-05")
         
-        # Return tool descriptions based on protocol version
+        # Return tool descriptions based on session protocol version
         tools = []
         for tool in self.tools.values():
             tool_desc = ToolDescription(
@@ -267,8 +278,8 @@ class McpReferenceServer:
                 inputSchema=tool["inputSchema"]
             )
             
-            # Add 2025-06-18 specific fields if supported
-            if self.supports_2025_06_18:
+            # Add 2025-06-18 specific fields if the session uses that protocol
+            if session_protocol == "2025-06-18":
                 if "title" in tool:
                     tool_desc.title = tool["title"]
                 if "outputSchema" in tool:
@@ -280,8 +291,9 @@ class McpReferenceServer:
     
     async def call_tool(self, session_id: str, params: CallToolParams) -> CallToolResult:
         """Call a tool with the provided parameters."""
-        # Validate session
-        self.get_session(session_id)
+        # Validate session and get protocol version
+        session = self.get_session(session_id)
+        session_protocol = session.get("protocol_version", "2024-11-05")
         
         # Check if tool exists
         tool_name = params.name
@@ -298,8 +310,8 @@ class McpReferenceServer:
             # Call tool handler
             result = await tool["handler"](**params.parameters)
             
-            # Format result based on protocol version
-            if self.supports_2025_06_18:
+            # Format result based on session protocol version
+            if session_protocol == "2025-06-18":
                 # 2025-06-18 format with structured content
                 content = [{"type": "text", "text": str(result)}]
                 structured_content = None
@@ -329,7 +341,7 @@ class McpReferenceServer:
         except Exception as e:
             logger.error(f"Error calling tool {tool_name}: {e}")
             
-            if self.supports_2025_06_18:
+            if session_protocol == "2025-06-18":
                 return CallToolResult(
                     content=[{"type": "text", "text": f"Tool execution error: {str(e)}"}],
                     isError=True
@@ -508,19 +520,21 @@ async def handle_post_message(request: Request):
         
         # Handle batch requests (not supported in 2025-06-18)
         if isinstance(data, list):
-            # Check if 2025-06-18 protocol is being used
-            protocol_version = request.headers.get("MCP-Protocol-Version", "")
-            if protocol_version == "2025-06-18":
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32600,
-                            "message": "JSON-RPC batching is not supported in protocol version 2025-06-18"
+            # Check if 2025-06-18 protocol is being used by getting session info
+            session_id = request.query_params.get("session_id")
+            if session_id and session_id in mcp_server.sessions:
+                session_protocol = mcp_server.sessions[session_id].get("protocol_version", "2024-11-05")
+                if session_protocol == "2025-06-18":
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "jsonrpc": "2.0",
+                            "error": {
+                                "code": -32600,
+                                "message": "JSON-RPC batching is not supported in protocol version 2025-06-18"
+                            }
                         }
-                    }
-                )
+                    )
             
             try:
                 responses = []
