@@ -45,6 +45,10 @@ class MCP2025_06_18Adapter(MCP2025_03_26Adapter):
         super().__init__(transport, debug)
         self.elicitation_requests = {}
         self.protocol_version_header = "2025-06-18"
+        
+        # Configure transport for 2025-06-18 requirements
+        if hasattr(transport, 'protocol_version'):
+            transport.protocol_version = "2025-06-18"
     
     @property
     def version(self) -> str:

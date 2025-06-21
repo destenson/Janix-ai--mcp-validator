@@ -52,7 +52,9 @@ class HttpTransportAdapter(MCPTransportAdapter):
                  debug: bool = False,
                  timeout: float = 30.0,
                  max_retries: int = 3,
-                 retry_delay: float = 1.0):
+                 retry_delay: float = 1.0,
+                 protocol_version: Optional[str] = None,
+                 bearer_token: Optional[str] = None):
         """
         Initialize the HTTP transport adapter.
         
@@ -67,6 +69,8 @@ class HttpTransportAdapter(MCPTransportAdapter):
             timeout: Request timeout in seconds
             max_retries: Number of retry attempts
             retry_delay: Delay between retry attempts in seconds
+            protocol_version: MCP protocol version (for 2025-06-18 header requirement)
+            bearer_token: OAuth 2.1 Bearer token for authentication (optional)
             
         Note:
             Either server_command or server_url must be provided.
@@ -83,10 +87,23 @@ class HttpTransportAdapter(MCPTransportAdapter):
             
         self.server_command = server_command
         self.server_url = server_url
+        self.protocol_version = protocol_version
+        self.bearer_token = bearer_token
+        
+        # Build default headers
         self.headers = headers or {
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
+        
+        # Add MCP-Protocol-Version header for 2025-06-18 (required by spec)
+        if self.protocol_version == "2025-06-18":
+            self.headers["MCP-Protocol-Version"] = self.protocol_version
+        
+        # Add OAuth 2.1 Bearer token if provided
+        if self.bearer_token:
+            self.headers["Authorization"] = f"Bearer {self.bearer_token}"
+        
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay = retry_delay
@@ -107,6 +124,10 @@ class HttpTransportAdapter(MCPTransportAdapter):
             handler.setFormatter(logging.Formatter('%(name)s - %(levelname)s - %(message)s'))
             self.logger.addHandler(handler)
             self.logger.debug(f"Created adapter with session ID: {self.session_id}")
+            if self.bearer_token:
+                self.logger.debug("OAuth 2.1 Bearer token configured")
+            if self.protocol_version == "2025-06-18":
+                self.logger.debug("MCP-Protocol-Version header set for 2025-06-18")
     
     def _create_session(self) -> requests.Session:
         """Create and configure a requests Session."""
@@ -353,6 +374,37 @@ class HttpTransportAdapter(MCPTransportAdapter):
     def _handle_response(self, response: requests.Response) -> Dict[str, Any]:
         """Handle HTTP response and convert to JSON-RPC format."""
         try:
+            # Handle 401 Unauthorized responses (OAuth 2.1 requirement)
+            if response.status_code == 401:
+                www_authenticate = response.headers.get("WWW-Authenticate", "")
+                if self.debug:
+                    self.logger.debug(f"Received 401 with WWW-Authenticate: {www_authenticate}")
+                
+                # Parse WWW-Authenticate header as required by 2025-06-18 spec
+                auth_error_data = {"www_authenticate": www_authenticate}
+                if www_authenticate:
+                    # Basic parsing of WWW-Authenticate header
+                    if "Bearer" in www_authenticate:
+                        auth_error_data["scheme"] = "Bearer"
+                        # Extract realm, scope, error, etc. if present
+                        parts = www_authenticate.split(",")
+                        for part in parts:
+                            if "=" in part:
+                                key, value = part.strip().split("=", 1)
+                                key = key.strip().lower()
+                                value = value.strip().strip('"')
+                                auth_error_data[key] = value
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32001,  # Authentication error
+                        "message": "Authentication required",
+                        "data": auth_error_data
+                    },
+                    "id": None
+                }
+            
             # Try to parse JSON response
             json_response = response.json()
             
@@ -384,6 +436,23 @@ class HttpTransportAdapter(MCPTransportAdapter):
             # Handle non-JSON responses
             if not response.ok:
                 error_code = self.HTTP_CODE_MAP.get(response.status_code, -32603)
+                
+                # Special handling for 401 responses without JSON
+                if response.status_code == 401:
+                    www_authenticate = response.headers.get("WWW-Authenticate", "")
+                    return {
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32001,
+                            "message": "Authentication required",
+                            "data": {
+                                "www_authenticate": www_authenticate,
+                                "response_text": response.text
+                            }
+                        },
+                        "id": None
+                    }
+                
                 return {
                     "jsonrpc": "2.0",
                     "error": {
@@ -442,9 +511,13 @@ class HttpTransportAdapter(MCPTransportAdapter):
             self.session_id = str(uuid.uuid4())
             self.logger.debug(f"Created new session ID: {self.session_id}")
             
-        # Add session ID to headers
+        # Add session ID and protocol version to headers
         headers = self.headers.copy()
         headers["Mcp-Session-Id"] = self.session_id
+        
+        # Ensure MCP-Protocol-Version header is set for 2025-06-18
+        if self.protocol_version == "2025-06-18":
+            headers["MCP-Protocol-Version"] = self.protocol_version
             
         self.logger.debug(f"Sending request: {request}")
         self.logger.debug(f"Headers: {headers}")
@@ -458,7 +531,7 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 timeout=self.timeout
             )
             
-            # Process response
+            # Process response (includes 401/WWW-Authenticate handling)
             json_response = self._handle_response(response)
             
             # Extract session ID if this is an initialization response
@@ -537,9 +610,13 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 self.session_id = str(uuid.uuid4())
                 self.logger.debug(f"Created new session ID for notification: {self.session_id}")
             
-            # Add session ID header
+            # Add session ID and protocol version header
             headers = self.headers.copy()
             headers["Mcp-Session-Id"] = self.session_id
+            
+            # Ensure MCP-Protocol-Version header is set for 2025-06-18
+            if self.protocol_version == "2025-06-18":
+                headers["MCP-Protocol-Version"] = self.protocol_version
             
             # Send the HTTP request (no response expected)
             response = self.session.post(
@@ -549,7 +626,7 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 timeout=self.timeout
             )
             
-            # Check for HTTP errors
+            # Check for HTTP errors (including 401 authentication)
             response.raise_for_status()
             
         except requests.RequestException as e:
@@ -582,9 +659,13 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 self.session_id = str(uuid.uuid4())
                 self.logger.debug(f"Created new session ID for batch: {self.session_id}")
             
-            # Add session ID header
+            # Add session ID and protocol version header
             headers = self.headers.copy()
             headers["Mcp-Session-Id"] = self.session_id
+            
+            # Ensure MCP-Protocol-Version header is set for 2025-06-18
+            if self.protocol_version == "2025-06-18":
+                headers["MCP-Protocol-Version"] = self.protocol_version
             
             # Send the HTTP request
             response = self.session.post(
@@ -594,7 +675,7 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 timeout=self.timeout
             )
             
-            # Check for HTTP errors
+            # Check for HTTP errors (including 401 authentication)
             response.raise_for_status()
             
             # Parse the response

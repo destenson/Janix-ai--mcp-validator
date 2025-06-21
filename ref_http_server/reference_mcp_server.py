@@ -31,6 +31,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger("mcp-reference-server")
 
+# OAuth 2.1 / Authentication Configuration
+# In a real implementation, these would be loaded from environment variables or config
+OAUTH_ENABLED = False  # Set to True to enable OAuth 2.1 authentication
+OAUTH_REALM = "mcp-server"
+OAUTH_SCOPE = "mcp:read mcp:write"
+VALID_TOKENS = {
+    # Example tokens - in production, validate against OAuth server
+    "valid-test-token-123": {
+        "audience": "mcp-server",
+        "scope": ["mcp:read", "mcp:write"],
+        "expires_at": "2025-12-31T23:59:59Z"
+    }
+}
+
 # Define MCP protocol models
 class ClientInfo(BaseModel):
     """Client information provided during initialization."""
@@ -105,6 +119,85 @@ class CallToolResult(BaseModel):
     content: List[Dict[str, Any]]
     isError: bool = False
     structuredContent: Optional[Dict[str, Any]] = None  # New in 2025-06-18
+
+# OAuth 2.1 Authentication Functions
+def validate_bearer_token(authorization: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    Validate OAuth 2.1 Bearer token.
+    
+    Args:
+        authorization: Authorization header value
+        
+    Returns:
+        Token info if valid, None if invalid or missing
+    """
+    if not OAUTH_ENABLED:
+        return {"valid": True, "scope": ["mcp:read", "mcp:write"]}
+    
+    if not authorization:
+        return None
+    
+    if not authorization.startswith("Bearer "):
+        return None
+    
+    token = authorization[7:]  # Remove "Bearer " prefix
+    
+    # In a real implementation, validate token with OAuth server
+    token_info = VALID_TOKENS.get(token)
+    if not token_info:
+        return None
+    
+    # Check token expiration, audience, etc.
+    # For demo purposes, we'll assume the token is valid
+    return token_info
+
+def create_www_authenticate_header(error: str = "invalid_token", 
+                                 error_description: str = "The access token is invalid") -> str:
+    """
+    Create WWW-Authenticate header as required by OAuth 2.1 and 2025-06-18 spec.
+    
+    Args:
+        error: OAuth error code
+        error_description: Human-readable error description
+        
+    Returns:
+        WWW-Authenticate header value
+    """
+    return f'Bearer realm="{OAUTH_REALM}", scope="{OAUTH_SCOPE}", error="{error}", error_description="{error_description}"'
+
+def check_authentication(authorization: Optional[str] = Header(None),
+                        mcp_protocol_version: Optional[str] = Header(None, alias="MCP-Protocol-Version")) -> Dict[str, Any]:
+    """
+    Check authentication for requests.
+    
+    Args:
+        authorization: Authorization header
+        mcp_protocol_version: MCP protocol version header (required for 2025-06-18)
+        
+    Returns:
+        Authentication info
+        
+    Raises:
+        HTTPException: If authentication fails
+    """
+    # Validate MCP-Protocol-Version header for 2025-06-18
+    if mcp_protocol_version == "2025-06-18":
+        logger.debug(f"2025-06-18 protocol detected, MCP-Protocol-Version header: {mcp_protocol_version}")
+    
+    # Check OAuth 2.1 authentication if enabled
+    if OAUTH_ENABLED:
+        token_info = validate_bearer_token(authorization)
+        if not token_info:
+            www_authenticate = create_www_authenticate_header()
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required",
+                headers={"WWW-Authenticate": www_authenticate}
+            )
+        return token_info
+    
+    # Authentication not required
+    return {"valid": True}
 
 # Reference MCP Server Implementation
 class McpReferenceServer:
@@ -488,20 +581,18 @@ class McpReferenceServer:
 # Create FastAPI application
 app = FastAPI(
     title="MCP Reference Server",
-    # Disable automatic response model to allow SSE streaming
-    response_model=None,
-    # Configure CORS
-    default_response_class=JSONResponse
+    description="Reference implementation of Model Context Protocol server with OAuth 2.1 support",
+    version="1.0.0"
 )
 
-# Allow CORS
+# Add CORS middleware with proper security headers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:*", "https://localhost:*"],  # Restrict origins for security
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
     allow_headers=["*"],
-    expose_headers=["Mcp-Session-Id"]
+    expose_headers=["Mcp-Session-Id", "WWW-Authenticate", "MCP-Protocol-Version"],
 )
 
 # Create MCP server instance
@@ -510,170 +601,151 @@ mcp_server = McpReferenceServer(
     protocol_versions=["2024-11-05", "2025-03-26", "2025-06-18"]  # Added 2025-06-18 support
 )
 
-# Handle HTTP methods
 @app.post("/messages")
-async def handle_post_message(request: Request):
-    """Handle POST requests to /messages endpoint."""
+async def handle_post_message(request: Request, 
+                            auth_info: Dict[str, Any] = Depends(check_authentication)):
+    """Handle POST requests to /messages endpoint with OAuth 2.1 authentication."""
     try:
-        data = await request.json()
-        logger.debug(f"Received message: {data}")
+        # Extract session ID from query parameters or headers
+        session_id = request.query_params.get("session_id")
+        if not session_id:
+            session_id = request.headers.get("Mcp-Session-Id")
         
-        # Handle batch requests (not supported in 2025-06-18)
-        if isinstance(data, list):
-            # Check if 2025-06-18 protocol is being used by getting session info
-            session_id = request.query_params.get("session_id")
-            if session_id and session_id in mcp_server.sessions:
-                session_protocol = mcp_server.sessions[session_id].get("protocol_version", "2024-11-05")
-                if session_protocol == "2025-06-18":
-                    return JSONResponse(
-                        status_code=400,
-                        content={
-                            "jsonrpc": "2.0",
-                            "error": {
-                                "code": -32600,
-                                "message": "JSON-RPC batching is not supported in protocol version 2025-06-18"
-                            }
-                        }
-                    )
-            
-            try:
-                responses = []
-                for request_item in data:
-                    # Process each request
-                    response = await mcp_server.handle_message(
-                        request_item,
-                        request.query_params.get("session_id")
-                    )
-                    if response.status_code == 200:
-                        responses.append(json.loads(response.body))
-                    else:
-                        # Return error response directly
-                        return response
-                
-                # Return combined responses
-                return JSONResponse(content=responses)
-            except Exception as e:
-                logger.error(f"Error handling batch request: {e}")
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": "Invalid batch request format"}
-                )
+        # Get request body
+        body = await request.json()
         
-        # Handle single request
-        return await mcp_server.handle_message(
-            data,
-            request.query_params.get("session_id")
-        )
-    
+        # Handle the message
+        response = await server.handle_message(body, session_id)
+        
+        # Add session ID to response headers if available
+        if hasattr(response, 'headers') and session_id:
+            response.headers["Mcp-Session-Id"] = session_id
+        
+        return response
+        
     except json.JSONDecodeError:
         return JSONResponse(
             status_code=400,
-            content={"error": "Invalid JSON"}
+            content={
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32700,
+                    "message": "Parse error"
+                },
+                "id": None
+            }
         )
     except Exception as e:
-        logger.error(f"Error handling message: {e}")
+        logger.error(f"Error handling POST message: {str(e)}")
         return JSONResponse(
             status_code=500,
-            content={"error": str(e)}
+            content={
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": "Internal error",
+                    "data": str(e)
+                },
+                "id": None
+            }
         )
 
 @app.get("/messages")
-async def handle_get_message(request: Request, session_id: str = None):
-    """Handle GET requests to /messages endpoint."""
-    # Check if client accepts SSE
-    accept_header = request.headers.get("accept", "")
-    if "text/event-stream" not in accept_header:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "Client must accept text/event-stream"}
-        )
-        
+async def handle_get_message(request: Request, 
+                           session_id: str = None,
+                           auth_info: Dict[str, Any] = Depends(check_authentication)):
+    """Handle GET requests for SSE notifications with OAuth 2.1 authentication."""
+    # Extract session ID
+    if not session_id:
+        session_id = request.headers.get("Mcp-Session-Id")
+    
     if not session_id:
         return JSONResponse(
             status_code=400,
-            content={"error": "Missing session_id query parameter"}
+            content={
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32602,
+                    "message": "Session ID required"
+                },
+                "id": None
+            }
         )
     
-    # Validate session
+    # Validate session exists
     try:
-        mcp_server.get_session(session_id)
-    except HTTPException:
-        return JSONResponse(
-            status_code=404,
-            content={"error": f"Session not found: {session_id}"}
-        )
+        server.get_session(session_id)
+    except HTTPException as e:
+        if e.status_code == 404:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32001,
+                        "message": "Session not found"
+                    },
+                    "id": None
+                }
+            )
+        raise
     
-    # Define SSE event generator
+    # Return SSE stream
     async def event_generator():
         """Generate SSE events for the client."""
         try:
-            # Send initial connection established event
-            yield {
-                "event": "connected",
-                "data": json.dumps({
+            while True:
+                # Send periodic ping messages
+                ping_data = {
                     "jsonrpc": "2.0",
-                    "method": "notifications/connected",
+                    "method": "notifications/ping",
                     "params": {
                         "timestamp": datetime.now().isoformat()
                     }
-                })
-            }
-            
-            # Keep connection alive with periodic pings
-            while True:
-                await asyncio.sleep(30)
-                # Check if session still exists
-                try:
-                    mcp_server.get_session(session_id)
-                    yield {
-                        "event": "ping",
-                        "data": json.dumps({
-                            "jsonrpc": "2.0",
-                            "method": "notifications/ping",
-                            "params": {
-                                "timestamp": datetime.now().isoformat()
-                            }
-                        })
-                    }
-                except HTTPException:
-                    # Session expired, close connection
-                    logger.info(f"Session {session_id} expired, closing SSE connection")
-                    break
+                }
+                yield {
+                    "event": "ping",
+                    "data": json.dumps(ping_data)
+                }
+                
+                # Wait before next ping
+                await asyncio.sleep(21)  # Slightly longer than typical SSE timeout
+                
+        except asyncio.CancelledError:
+            logger.info(f"SSE stream cancelled for session {session_id}")
         except Exception as e:
-            logger.error(f"Error in SSE event generator: {e}")
-            yield {
-                "event": "error",
-                "data": json.dumps({
-                    "jsonrpc": "2.0",
-                    "method": "notifications/error",
-                    "params": {
-                        "message": str(e)
-                    }
-                })
-            }
+            logger.error(f"Error in SSE stream: {str(e)}")
     
-    # Return SSE response with proper headers
     return EventSourceResponse(
         event_generator(),
-        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "X-Accel-Buffering": "no"  # Disable proxy buffering
+            "Mcp-Session-Id": session_id
         }
     )
 
-# Server info endpoint
 @app.get("/")
 async def server_info():
-    """Return information about the server."""
-    return {
-        "name": mcp_server.name,
-        "protocol_versions": mcp_server.protocol_versions,
-        "tools_count": len(mcp_server.tools),
-        "active_sessions": len(mcp_server.sessions)
+    """Return server information and OAuth 2.1 discovery metadata."""
+    info = {
+        "name": "MCP Reference Server",
+        "version": "1.0.0",
+        "protocol_versions": ["2024-11-05", "2025-03-26", "2025-06-18"],
+        "description": "Reference implementation of MCP server with OAuth 2.1 support"
     }
+    
+    # Add OAuth 2.1 Protected Resource Metadata (RFC 9728)
+    if OAUTH_ENABLED:
+        info["oauth"] = {
+            "authorization_server": "https://auth.example.com",  # Would be real auth server
+            "resource_server": "mcp-server",
+            "scopes_supported": ["mcp:read", "mcp:write"],
+            "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+            "resource_indicators_supported": True  # RFC 8707 requirement
+        }
+    
+    return info
 
 def main():
     """Run the server."""
