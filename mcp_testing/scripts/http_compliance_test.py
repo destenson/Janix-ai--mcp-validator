@@ -107,9 +107,9 @@ class McpHttpComplianceTest:
                 "Accept": "application/json, text/event-stream"
             }
             
-            # Make the request to the messages endpoint
+            # Make the request to the mcp endpoint
             response = self.client.post(
-                f"{self.server_url}/messages",
+                f"{self.server_url}/mcp",
                 json=init_payload,
                 headers=headers
             )
@@ -204,7 +204,7 @@ class McpHttpComplianceTest:
                     "method": "notifications/initialized"
                 }
                 
-                initialized_url = f"{self.server_url}/messages?session_id={self.session_id}"
+                initialized_url = f"{self.server_url}/mcp?session_id={self.session_id}"
                 initialized_response = self.client.post(
                     initialized_url,
                     json=initialized_payload,
@@ -255,7 +255,7 @@ class McpHttpComplianceTest:
                 "Content-Type": "application/json"
             }
             
-            url = f"{self.server_url}/messages?session_id={self.session_id}"
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
             
             tools_list_response = self.client.post(
                 url,
@@ -391,7 +391,7 @@ class McpHttpComplianceTest:
             return False
         
         try:
-            url = f"{self.server_url}/messages?session_id={self.session_id}"
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
             headers = {
                 "Content-Type": "application/json"
             }
@@ -497,7 +497,7 @@ class McpHttpComplianceTest:
             return False
         
         try:
-            url = f"{self.server_url}/messages?session_id={self.session_id}"
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
             headers = {
                 "Content-Type": "application/json"
             }
@@ -613,7 +613,7 @@ class McpHttpComplianceTest:
             }
             
             no_session_response = self.client.post(
-                f"{self.server_url}/messages",
+                f"{self.server_url}/mcp",
                 json=no_session_payload,
                 headers=headers
             )
@@ -628,7 +628,7 @@ class McpHttpComplianceTest:
                 return False
             
             # Test invalid session ID
-            invalid_session_url = f"{self.server_url}/messages?session_id=invalid-session-id-{uuid.uuid4()}"
+            invalid_session_url = f"{self.server_url}/mcp?session_id=invalid-session-id-{uuid.uuid4()}"
             invalid_session_response = self.client.post(
                 invalid_session_url,
                 json=no_session_payload,
@@ -686,7 +686,7 @@ class McpHttpComplianceTest:
             test_client = httpx.Client(follow_redirects=True)
             
             response = test_client.post(
-                f"{self.server_url}/messages",
+                f"{self.server_url}/mcp",
                 json=init_payload,
                 headers=headers
             )
@@ -750,7 +750,7 @@ class McpHttpComplianceTest:
             return False
         
         try:
-            url = f"{self.server_url}/messages?session_id={self.session_id}"
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
             headers = {
                 "Content-Type": "application/json"
             }

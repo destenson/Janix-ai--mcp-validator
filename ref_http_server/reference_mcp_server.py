@@ -21,7 +21,7 @@ import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Request, Response, WebSocket, status, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sse_starlette.sse import EventSourceResponse
 
 # Configure logging
@@ -544,13 +544,53 @@ class McpReferenceServer:
                         "message": "Missing params for tools/call"
                     }
                     return JSONResponse(status_code=400, content=response)
+                
                 tool_params = data["params"]
-                params = CallToolParams(
-                    name=tool_params["name"],
-                    parameters=tool_params["arguments"]
-                )
-                result = await self.call_tool(session_id, params)
-                response["result"] = result.model_dump()
+                
+                # Validate that params is a dictionary
+                if not isinstance(tool_params, dict):
+                    response["error"] = {
+                        "code": -32602,
+                        "message": f"Invalid params type for tools/call: expected object, got {type(tool_params).__name__}"
+                    }
+                    return JSONResponse(status_code=400, content=response)
+                
+                # Validate required fields
+                if "name" not in tool_params:
+                    response["error"] = {
+                        "code": -32602,
+                        "message": "Missing 'name' field in tools/call params"
+                    }
+                    return JSONResponse(status_code=400, content=response)
+                
+                if "arguments" not in tool_params:
+                    response["error"] = {
+                        "code": -32602,
+                        "message": "Missing 'arguments' field in tools/call params"
+                    }
+                    return JSONResponse(status_code=400, content=response)
+                
+                # Validate arguments is a dictionary
+                if not isinstance(tool_params["arguments"], dict):
+                    response["error"] = {
+                        "code": -32602,
+                        "message": f"Invalid arguments type for tools/call: expected object, got {type(tool_params['arguments']).__name__}"
+                    }
+                    return JSONResponse(status_code=400, content=response)
+                
+                try:
+                    params = CallToolParams(
+                        name=tool_params["name"],
+                        parameters=tool_params["arguments"]
+                    )
+                    result = await self.call_tool(session_id, params)
+                    response["result"] = result.model_dump()
+                except ValidationError as e:
+                    response["error"] = {
+                        "code": -32602,
+                        "message": f"Invalid tool call parameters: {str(e)}"
+                    }
+                    return JSONResponse(status_code=400, content=response)
             
             elif method == "ping":
                 response["result"] = {"timestamp": datetime.now().isoformat()}
@@ -601,10 +641,10 @@ mcp_server = McpReferenceServer(
     protocol_versions=["2024-11-05", "2025-03-26", "2025-06-18"]  # Added 2025-06-18 support
 )
 
-@app.post("/messages")
+@app.post("/mcp")
 async def handle_post_message(request: Request, 
                             auth_info: Dict[str, Any] = Depends(check_authentication)):
-    """Handle POST requests to /messages endpoint with OAuth 2.1 authentication."""
+    """Handle POST requests to /mcp endpoint with OAuth 2.1 authentication."""
     try:
         # Extract session ID from query parameters or headers
         session_id = request.query_params.get("session_id")
@@ -613,6 +653,45 @@ async def handle_post_message(request: Request,
         
         # Get request body
         body = await request.json()
+        
+        # Check for batch requests (arrays) and reject them for 2025-06-18
+        if isinstance(body, list):
+            # Get protocol version from headers or determine from session
+            protocol_version = request.headers.get("MCP-Protocol-Version")
+            if not protocol_version and session_id:
+                try:
+                    session_info = mcp_server.get_session(session_id)
+                    protocol_version = session_info.get("protocol_version")
+                except:
+                    protocol_version = None
+            
+            # For 2025-06-18, batch requests are not supported
+            if protocol_version == "2025-06-18":
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32600,
+                            "message": "Batch requests are not supported in protocol version 2025-06-18"
+                        },
+                        "id": None
+                    }
+                )
+            
+            # For older protocols, batch requests would be handled here
+            # But for simplicity, we'll reject all batch requests for now
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32600,
+                        "message": "Batch requests are not supported by this server"
+                    },
+                    "id": None
+                }
+            )
         
         # Handle the message
         response = await mcp_server.handle_message(body, session_id)
@@ -650,7 +729,7 @@ async def handle_post_message(request: Request,
             }
         )
 
-@app.get("/messages")
+@app.get("/mcp")
 async def handle_get_message(request: Request, 
                            session_id: str = None,
                            auth_info: Dict[str, Any] = Depends(check_authentication)):

@@ -110,14 +110,26 @@ class MCPHttpTester:
         request_headers["Mcp-Session-Id"] = self.session_id
         self.log(f"Using session ID in request: {self.session_id}")
         
+        # Add protocol version header for 2025-06-18
+        if self.protocol_version == "2025-06-18":
+            request_headers["MCP-Protocol-Version"] = self.protocol_version
+        
         # Add any additional headers
         if headers:
             request_headers.update(headers)
         
         try:
+            # Build the URL with session ID for non-initialization requests
+            request_url = self.url
+            if method != "initialize" and self.session_id:
+                # Add session ID as URL parameter
+                separator = "&" if "?" in request_url else "?"
+                request_url = f"{request_url}{separator}session_id={self.session_id}"
+                self.log(f"Using URL with session ID: {request_url}")
+            
             # Send the request
             response = self.request_session.post(
-                self.url,
+                request_url,
                 json=request,
                 headers=request_headers,
                 timeout=5  # 5 second timeout
@@ -129,26 +141,62 @@ class MCPHttpTester:
             self.log(f"Response Status: {status}")
             self.log(f"Response Headers: {headers}")
             
-            # If this is a successful initialize response, check for session ID in headers
-            if method == "initialize" and status == 200:
-                if "mcp-session-id" in headers:
-                    self.session_id = headers["mcp-session-id"]
-                    self.log(f"Captured session ID from headers: {self.session_id}")
-                else:
-                    # Try case-insensitive match
-                    for header_key in headers:
-                        if header_key.lower() == "mcp-session-id":
-                            self.session_id = headers[header_key]
-                            self.log(f"Captured session ID from headers (case insensitive): {self.session_id}")
-                            break
-            
-            # Try to parse JSON response
+            # Parse JSON response first
             try:
                 body = response.json()
                 self.log(f"Response Body: {json.dumps(body)}")
             except ValueError:
                 body = response.text
                 self.log(f"Response Body (text): {body}")
+            
+            # If this is a successful initialize response, check for session ID in body first, then headers
+            if method == "initialize" and status == 200:
+                # First try to get session ID from response body (server-provided session ID)
+                try:
+                    if isinstance(body, dict) and 'result' in body:
+                        result = body['result']
+                        if 'session_id' in result:
+                            self.session_id = result['session_id']
+                            self.log(f"Captured session ID from response body: {self.session_id}")
+                        elif 'sessionId' in result:
+                            self.session_id = result['sessionId']
+                            self.log(f"Captured session ID from response body (camelCase): {self.session_id}")
+                        else:
+                            # Fall back to headers
+                            if "mcp-session-id" in headers:
+                                self.session_id = headers["mcp-session-id"]
+                                self.log(f"Captured session ID from headers: {self.session_id}")
+                            else:
+                                # Try case-insensitive match
+                                for header_key in headers:
+                                    if header_key.lower() == "mcp-session-id":
+                                        self.session_id = headers[header_key]
+                                        self.log(f"Captured session ID from headers (case insensitive): {self.session_id}")
+                                        break
+                    else:
+                        # Fall back to headers
+                        if "mcp-session-id" in headers:
+                            self.session_id = headers["mcp-session-id"]
+                            self.log(f"Captured session ID from headers: {self.session_id}")
+                        else:
+                            # Try case-insensitive match
+                            for header_key in headers:
+                                if header_key.lower() == "mcp-session-id":
+                                    self.session_id = headers[header_key]
+                                    self.log(f"Captured session ID from headers (case insensitive): {self.session_id}")
+                                    break
+                except:
+                    # Fall back to headers
+                    if "mcp-session-id" in headers:
+                        self.session_id = headers["mcp-session-id"]
+                        self.log(f"Captured session ID from headers: {self.session_id}")
+                    else:
+                        # Try case-insensitive match
+                        for header_key in headers:
+                            if header_key.lower() == "mcp-session-id":
+                                self.session_id = headers[header_key]
+                                self.log(f"Captured session ID from headers (case insensitive): {self.session_id}")
+                                break
                 
             return status, headers, body
             
@@ -206,17 +254,32 @@ class MCPHttpTester:
         # First ensure we're not using any session ID
         self.session_id = None
         
-        params = {
-            "protocolVersion": self.protocol_version,
-            "clientInfo": {
-                "name": "MCP HTTP Tester",
-                "version": "1.0.0"
-            },
-            "capabilities": {
-                "tools": {"asyncSupported": True},
-                "resources": True
+        # Use different parameter names based on protocol version
+        if self.protocol_version == "2025-06-18":
+            params = {
+                "protocolVersion": self.protocol_version,
+                "client_info": {
+                    "name": "MCP HTTP Tester",
+                    "version": "1.0.0"
+                },
+                "client_capabilities": {
+                    "protocol_versions": [self.protocol_version],
+                    "tools": {"asyncSupported": True},
+                    "resources": True
+                }
             }
-        }
+        else:
+            params = {
+                "protocolVersion": self.protocol_version,
+                "clientInfo": {
+                    "name": "MCP HTTP Tester",
+                    "version": "1.0.0"
+                },
+                "capabilities": {
+                    "tools": {"asyncSupported": True},
+                    "resources": True
+                }
+            }
         
         try:
             status, headers, body = self.send_request("initialize", params)
@@ -251,24 +314,27 @@ class MCPHttpTester:
                 print(f"ERROR: Initialize request failed with status {status}")
                 return False
             
-            # Check for session ID in headers (preferred location)
-            if 'mcp-session-id' in headers:
-                self.session_id = headers['mcp-session-id']
-                print(f"Received session ID from headers: {self.session_id}")
-            # Check for lowercase variant
-            elif any(key.lower() == 'mcp-session-id' for key in headers):
-                key = next(key for key in headers if key.lower() == 'mcp-session-id')
-                self.session_id = headers[key]
-                print(f"Received session ID from headers (case insensitive): {self.session_id}")
-            # Check for session ID in body (alternative location)
-            elif isinstance(body, dict) and 'result' in body:
+            # Check for session ID in body first (server-provided session ID), then headers
+            if isinstance(body, dict) and 'result' in body:
                 result = body['result']
-                if 'sessionId' in result:
-                    self.session_id = result['sessionId']
+                if 'session_id' in result:
+                    self.session_id = result['session_id']
                     print(f"Received session ID from response body: {self.session_id}")
+                elif 'sessionId' in result:
+                    self.session_id = result['sessionId']
+                    print(f"Received session ID from response body (camelCase): {self.session_id}")
                 elif isinstance(result, dict) and 'session' in result and 'id' in result['session']:
                     self.session_id = result['session']['id']
                     print(f"Received session ID from nested session object: {self.session_id}")
+                # Fall back to headers if not found in body
+                elif 'mcp-session-id' in headers:
+                    self.session_id = headers['mcp-session-id']
+                    print(f"Received session ID from headers: {self.session_id}")
+                # Check for lowercase variant
+                elif any(key.lower() == 'mcp-session-id' for key in headers):
+                    key = next(key for key in headers if key.lower() == 'mcp-session-id')
+                    self.session_id = headers[key]
+                    print(f"Received session ID from headers (case insensitive): {self.session_id}")
                 else:
                     print("WARNING: No session ID found in response. Some servers may not require one.")
             else:
@@ -285,9 +351,9 @@ class MCPHttpTester:
             
             result = body['result']
             
-            # Check for required fields in result
-            if 'protocolVersion' not in result:
-                print("ERROR: Missing protocolVersion in result")
+            # Check for required fields in result (handle both formats)
+            if 'protocolVersion' not in result and 'protocol_version' not in result:
+                print("ERROR: Missing protocolVersion/protocol_version in result")
                 return False
             
             if 'serverInfo' not in result:
@@ -387,10 +453,17 @@ class MCPHttpTester:
         else:
             parameters = test_parameters
             
-        params = {
-            "name": tool_name,
-            "parameters": parameters
-        }
+        # Use different parameter names based on protocol version
+        if self.protocol_version == "2025-06-18":
+            params = {
+                "name": tool_name,
+                "arguments": parameters
+            }
+        else:
+            params = {
+                "name": tool_name,
+                "parameters": parameters
+            }
         
         status, _, body = self.send_request("tools/call", params)
         
@@ -453,12 +526,21 @@ class MCPHttpTester:
         
         sleep_time = 3  # seconds
         
-        params = {
-            "name": "sleep",
-            "parameters": {
-                "seconds": sleep_time
+        # Use different parameter names based on protocol version
+        if self.protocol_version == "2025-06-18":
+            params = {
+                "name": "sleep",
+                "arguments": {
+                    "seconds": sleep_time
+                }
             }
-        }
+        else:
+            params = {
+                "name": "sleep",
+                "parameters": {
+                    "seconds": sleep_time
+                }
+            }
         
         status, _, body = self.send_request("tools/call-async", params)
         

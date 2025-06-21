@@ -209,7 +209,7 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 init_headers["MCP-Protocol-Version"] = self.protocol_version
             
             response = self.session.post(
-                urljoin(self.server_url, "/messages"),
+                urljoin(self.server_url, "/mcp"),
                 json=init_request,
                 headers=init_headers,
                 timeout=self.timeout
@@ -547,7 +547,7 @@ class HttpTransportAdapter(MCPTransportAdapter):
         
         try:
             # Build URL with session ID for non-initialization requests
-            url = urljoin(self.server_url, "/messages")
+            url = urljoin(self.server_url, "/mcp")
             if method != "initialize" and self.session_id:
                 url += f"?session_id={self.session_id}"
             
@@ -647,7 +647,7 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 headers["MCP-Protocol-Version"] = self.protocol_version
             
             # Build URL with session ID for notifications
-            url = urljoin(self.server_url, "/messages")
+            url = urljoin(self.server_url, "/mcp")
             if self.session_id:
                 url += f"?session_id={self.session_id}"
             
@@ -701,7 +701,7 @@ class HttpTransportAdapter(MCPTransportAdapter):
                 headers["MCP-Protocol-Version"] = self.protocol_version
             
             # Build URL with session ID for batch requests
-            url = urljoin(self.server_url, "/messages")
+            url = urljoin(self.server_url, "/mcp")
             if self.session_id:
                 url += f"?session_id={self.session_id}"
             
