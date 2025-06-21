@@ -112,7 +112,7 @@ class ToolDescription(BaseModel):
 class CallToolParams(BaseModel):
     """Parameters for calling a tool."""
     name: str
-    parameters: Dict[str, Any]
+    arguments: Dict[str, Any]
 
 class CallToolResult(BaseModel):
     """Result of calling a tool."""
@@ -401,7 +401,7 @@ class McpReferenceServer:
         
         try:
             # Call tool handler
-            result = await tool["handler"](**params.parameters)
+            result = await tool["handler"](**params.arguments)
             
             # Format result based on session protocol version
             if session_protocol == "2025-06-18":
@@ -581,7 +581,7 @@ class McpReferenceServer:
                 try:
                     params = CallToolParams(
                         name=tool_params["name"],
-                        parameters=tool_params["arguments"]
+                        arguments=tool_params["arguments"]
                     )
                     result = await self.call_tool(session_id, params)
                     response["result"] = result.model_dump()
