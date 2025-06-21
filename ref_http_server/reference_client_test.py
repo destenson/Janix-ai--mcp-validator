@@ -70,9 +70,9 @@ class McpReferenceClient:
                 "Accept": "application/json, text/event-stream"
             }
             
-            # Make the request to the messages endpoint
+            # Make the request to the mcp endpoint
             response = self.client.post(
-                f"{self.server_url}/messages",
+                f"{self.server_url}/mcp",
                 json=init_payload,
                 headers=headers
             )
@@ -119,7 +119,7 @@ class McpReferenceClient:
                 "method": "notifications/initialized"
             }
             
-            initialized_url = f"{self.server_url}/messages?session_id={self.session_id}"
+            initialized_url = f"{self.server_url}/mcp?session_id={self.session_id}"
             initialized_response = self.client.post(
                 initialized_url,
                 json=initialized_payload,
@@ -159,7 +159,7 @@ class McpReferenceClient:
             }
             
             # Include session ID as query parameter
-            url = f"{self.server_url}/messages?session_id={self.session_id}"
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
             
             # Make the request
             response = self.client.post(
@@ -223,7 +223,7 @@ class McpReferenceClient:
             }
             
             # Include session ID as query parameter
-            url = f"{self.server_url}/messages?session_id={self.session_id}"
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
             
             # Make the request
             response = self.client.post(
@@ -274,7 +274,7 @@ class McpReferenceClient:
             }
             
             # Include session ID as query parameter
-            url = f"{self.server_url}/messages?session_id={self.session_id}"
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
             
             # Make the request
             response = self.client.post(
@@ -324,7 +324,7 @@ class McpReferenceClient:
             }
             
             # Include session ID as query parameter
-            url = f"{self.server_url}/messages?session_id={self.session_id}"
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
             
             # Record start time
             start_time = time.time()
@@ -373,7 +373,7 @@ class McpReferenceClient:
             }
             
             # Include session ID as query parameter
-            url = f"{self.server_url}/messages?session_id={self.session_id}"
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
             
             # Make the request
             response = self.client.get(

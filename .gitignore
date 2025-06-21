@@ -48,3 +48,4 @@ reports/
 .ipynb_checkpoints/
 .DS_Store
 .venv/
+cursor.json

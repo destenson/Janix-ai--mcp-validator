@@ -1,0 +1,608 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/mcp-schema-2025-06-18.json",
+  "title": "MCP Protocol Schema (2025-06-18)",
+  "description": "JSON Schema for the MCP (Model Context Protocol) version 2025-06-18",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["jsonrpc"],
+  "properties": {
+    "jsonrpc": {
+      "type": "string",
+      "const": "2.0",
+      "description": "JSON-RPC version, must be 2.0"
+    },
+    "id": {
+      "type": ["string", "number"],
+      "description": "Request identifier (required for requests, not allowed for notifications)"
+    },
+    "method": {
+      "type": "string",
+      "description": "The method to invoke"
+    },
+    "params": {
+      "type": "object",
+      "description": "Method parameters"
+    },
+    "result": {
+      "type": ["object", "array", "string", "number", "boolean", "null"],
+      "description": "Result of the method invocation"
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "description": "Error code"
+        },
+        "message": {
+          "type": "string",
+          "description": "Error message"
+        },
+        "data": {
+          "description": "Additional error data"
+        }
+      },
+      "required": ["code", "message"],
+      "description": "Error object"
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["jsonrpc", "method", "id"],
+      "description": "A request object (batching not supported in 2025-06-18)"
+    },
+    {
+      "type": "object",
+      "required": ["jsonrpc", "method"],
+      "not": {
+        "required": ["id"]
+      },
+      "description": "A notification object"
+    },
+    {
+      "type": "object",
+      "required": ["jsonrpc", "result", "id"],
+      "description": "A successful response object"
+    },
+    {
+      "type": "object",
+      "required": ["jsonrpc", "error", "id"],
+      "description": "An error response object"
+    }
+  ],
+  "definitions": {
+    "initialize_request": {
+      "type": "object",
+      "required": ["protocolVersion", "capabilities", "clientInfo"],
+      "properties": {
+        "protocolVersion": {
+          "type": "string",
+          "const": "2025-06-18",
+          "description": "The protocol version the client supports"
+        },
+        "capabilities": {
+          "type": "object",
+          "description": "The capabilities of the client",
+          "properties": {
+            "tools": {
+              "type": "object",
+              "description": "Tool-related capabilities",
+              "properties": {
+                "listChanged": {
+                  "type": "boolean",
+                  "description": "Whether the client supports tools/list notifications"
+                },
+                "asyncSupported": {
+                  "type": "boolean",
+                  "description": "Whether the client supports async tool execution"
+                }
+              }
+            },
+            "resources": {
+              "type": "object",
+              "description": "Resource-related capabilities",
+              "properties": {
+                "subscribe": {
+                  "type": "boolean",
+                  "description": "Whether the client supports resource subscriptions"
+                },
+                "listChanged": {
+                  "type": "boolean",
+                  "description": "Whether the client supports resource list change notifications"
+                }
+              }
+            },
+            "roots": {
+              "type": "object",
+              "description": "Root-related capabilities",
+              "properties": {
+                "listChanged": {
+                  "type": "boolean",
+                  "description": "Whether the client supports root list change notifications"
+                }
+              }
+            },
+            "sampling": {
+              "type": "object",
+              "description": "Sampling-related capabilities"
+            },
+            "elicitation": {
+              "type": "object",
+              "description": "Elicitation-related capabilities (new in 2025-06-18)"
+            },
+            "logging": {
+              "type": "object",
+              "description": "Logging-related capabilities"
+            }
+          }
+        },
+        "clientInfo": {
+          "type": "object",
+          "description": "Information about the client",
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Name of the client"
+            },
+            "version": {
+              "type": "string",
+              "description": "Version of the client"
+            }
+          }
+        }
+      }
+    },
+    "initialize_response": {
+      "type": "object",
+      "required": ["protocolVersion", "capabilities", "serverInfo"],
+      "properties": {
+        "protocolVersion": {
+          "type": "string",
+          "const": "2025-06-18",
+          "description": "The protocol version the server selected"
+        },
+        "capabilities": {
+          "type": "object",
+          "description": "The capabilities of the server",
+          "properties": {
+            "tools": {
+              "type": "object",
+              "description": "Tool-related capabilities",
+              "properties": {
+                "listChanged": {
+                  "type": "boolean",
+                  "description": "Whether the server supports tools/list notifications"
+                }
+              }
+            },
+            "resources": {
+              "type": "object",
+              "description": "Resource-related capabilities",
+              "properties": {
+                "subscribe": {
+                  "type": "boolean",
+                  "description": "Whether the server supports resource subscriptions"
+                },
+                "listChanged": {
+                  "type": "boolean",
+                  "description": "Whether the server supports resource list change notifications"
+                }
+              }
+            },
+            "prompts": {
+              "type": "object",
+              "description": "Prompt-related capabilities",
+              "properties": {
+                "listChanged": {
+                  "type": "boolean",
+                  "description": "Whether the server supports prompt list change notifications"
+                }
+              }
+            },
+            "elicitation": {
+              "type": "object",
+              "description": "Elicitation-related capabilities (new in 2025-06-18)"
+            },
+            "logging": {
+              "type": "object",
+              "description": "Logging-related capabilities"
+            }
+          }
+        },
+        "serverInfo": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Name of the server"
+            },
+            "version": {
+              "type": "string",
+              "description": "Version of the server"
+            }
+          }
+        }
+      }
+    },
+    "tools_list_request": {
+      "type": "object",
+      "properties": {}
+    },
+    "tools_list_response": {
+      "type": "object",
+      "required": ["tools"],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "description", "inputSchema"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the tool"
+              },
+              "title": {
+                "type": "string",
+                "description": "Human-friendly display name for the tool (new in 2025-06-18)"
+              },
+              "description": {
+                "type": "string",
+                "description": "Description of the tool"
+              },
+              "inputSchema": {
+                "type": "object",
+                "description": "JSON Schema for tool input parameters (renamed from 'parameters' in 2025-06-18)"
+              },
+              "outputSchema": {
+                "type": "object",
+                "description": "JSON Schema for structured tool output (new in 2025-06-18)"
+              }
+            }
+          }
+        }
+      }
+    },
+    "tools_call_request": {
+      "type": "object",
+      "required": ["name", "arguments"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the tool to call"
+        },
+        "arguments": {
+          "type": "object",
+          "description": "Arguments to pass to the tool"
+        }
+      }
+    },
+    "tools_call_response": {
+      "type": "object",
+      "required": ["content", "isError"],
+      "properties": {
+        "content": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["text", "image", "audio", "resource", "resource_link"],
+                "description": "Type of content"
+              },
+              "text": {
+                "type": "string",
+                "description": "Text content (for text type)"
+              },
+              "data": {
+                "type": "string",
+                "description": "Base64-encoded data (for image/audio types)"
+              },
+              "mimeType": {
+                "type": "string",
+                "description": "MIME type of the content"
+              },
+              "uri": {
+                "type": "string",
+                "description": "URI of the resource (for resource/resource_link types)"
+              }
+            }
+          },
+          "description": "Array of content items returned by the tool"
+        },
+        "isError": {
+          "type": "boolean",
+          "description": "Whether the tool call resulted in an error"
+        },
+        "structuredContent": {
+          "type": "object",
+          "description": "Structured output conforming to outputSchema (new in 2025-06-18)"
+        }
+      }
+    },
+    "resources_list_request": {
+      "type": "object",
+      "properties": {}
+    },
+    "resources_list_response": {
+      "type": "object",
+      "required": ["resources"],
+      "properties": {
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["uri", "name"],
+            "properties": {
+              "uri": {
+                "type": "string",
+                "description": "URI of the resource"
+              },
+              "name": {
+                "type": "string",
+                "description": "Name of the resource"
+              },
+              "title": {
+                "type": "string",
+                "description": "Human-friendly display name for the resource"
+              },
+              "description": {
+                "type": "string",
+                "description": "Description of the resource"
+              },
+              "mimeType": {
+                "type": "string",
+                "description": "MIME type of the resource"
+              }
+            }
+          }
+        }
+      }
+    },
+    "resources_read_request": {
+      "type": "object",
+      "required": ["uri"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "description": "URI of the resource to read"
+        }
+      }
+    },
+    "resources_read_response": {
+      "type": "object",
+      "required": ["contents"],
+      "properties": {
+        "contents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["uri"],
+            "properties": {
+              "uri": {
+                "type": "string",
+                "description": "URI of the content"
+              },
+              "text": {
+                "type": "string",
+                "description": "Text content (if applicable)"
+              },
+              "blob": {
+                "type": "string",
+                "description": "Base64-encoded binary content (if applicable)"
+              },
+              "mimeType": {
+                "type": "string",
+                "description": "MIME type of the content"
+              }
+            }
+          }
+        }
+      }
+    },
+    "prompts_list_request": {
+      "type": "object",
+      "properties": {}
+    },
+    "prompts_list_response": {
+      "type": "object",
+      "required": ["prompts"],
+      "properties": {
+        "prompts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the prompt"
+              },
+              "title": {
+                "type": "string",
+                "description": "Human-friendly display name for the prompt"
+              },
+              "description": {
+                "type": "string",
+                "description": "Description of the prompt"
+              },
+              "arguments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "description"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "Name of the argument"
+                    },
+                    "description": {
+                      "type": "string",
+                      "description": "Description of the argument"
+                    },
+                    "required": {
+                      "type": "boolean",
+                      "description": "Whether the argument is required"
+                    }
+                  }
+                },
+                "description": "Arguments accepted by the prompt"
+              }
+            }
+          }
+        }
+      }
+    },
+    "elicitation_create_request": {
+      "type": "object",
+      "required": ["schema", "prompt"],
+      "properties": {
+        "schema": {
+          "type": "object",
+          "description": "JSON Schema for the expected response (must be flat object with primitive properties)"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "Human-readable prompt for the user"
+        }
+      },
+      "description": "Elicitation request (new in 2025-06-18)"
+    },
+    "elicitation_create_response": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["accept", "reject", "cancel"],
+          "description": "User's response to the elicitation request"
+        },
+        "content": {
+          "type": "object",
+          "description": "User-provided content (if action is 'accept')"
+        }
+      },
+      "description": "Elicitation response (new in 2025-06-18)"
+    },
+    "oauth_error_response": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "integer",
+          "const": -32001,
+          "description": "OAuth 2.1 authentication error code"
+        },
+        "message": {
+          "type": "string",
+          "description": "Error message"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "www_authenticate": {
+              "type": "string",
+              "description": "WWW-Authenticate header value as required by OAuth 2.1"
+            },
+            "scheme": {
+              "type": "string",
+              "const": "Bearer",
+              "description": "Authentication scheme"
+            },
+            "realm": {
+              "type": "string",
+              "description": "Authentication realm"
+            },
+            "scope": {
+              "type": "string",
+              "description": "Required OAuth scopes"
+            },
+            "error": {
+              "type": "string",
+              "description": "OAuth error code"
+            },
+            "error_description": {
+              "type": "string",
+              "description": "Human-readable error description"
+            }
+          },
+          "description": "OAuth 2.1 authentication error details"
+        }
+      },
+      "description": "OAuth 2.1 authentication error (new in 2025-06-18)"
+    },
+    "http_headers": {
+      "type": "object",
+      "properties": {
+        "Authorization": {
+          "type": "string",
+          "pattern": "^Bearer [A-Za-z0-9\\-._~+/]+=*$",
+          "description": "OAuth 2.1 Bearer token (required for authenticated requests)"
+        },
+        "MCP-Protocol-Version": {
+          "type": "string",
+          "const": "2025-06-18",
+          "description": "MCP protocol version header (required for 2025-06-18 HTTP requests)"
+        },
+        "Mcp-Session-Id": {
+          "type": "string",
+          "pattern": "^[\\x21-\\x7E]+$",
+          "description": "Session ID header (visible ASCII characters only)"
+        },
+        "Content-Type": {
+          "type": "string",
+          "const": "application/json",
+          "description": "Content type must be application/json"
+        },
+        "Accept": {
+          "type": "string",
+          "description": "Accept header for content negotiation"
+        },
+        "Origin": {
+          "type": "string",
+          "description": "Origin header (validated by server to prevent DNS rebinding attacks)"
+        }
+      },
+      "description": "HTTP headers for 2025-06-18 protocol"
+    },
+    "protocol_metadata": {
+      "type": "object",
+      "properties": {
+        "protocol_version": {
+          "type": "string",
+          "const": "2025-06-18"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "structured_tool_output",
+              "oauth_2_1_compliance",
+              "elicitation_support",
+              "no_json_rpc_batching",
+              "resource_links",
+              "protocol_version_headers",
+              "enhanced_security"
+            ]
+          },
+          "description": "Features supported in 2025-06-18"
+        },
+        "breaking_changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Breaking changes from previous versions"
+        }
+      },
+      "description": "Protocol metadata for 2025-06-18"
+    }
+  }
+} 

@@ -41,7 +41,7 @@ class TestStdioCli(unittest.TestCase):
             # Verify
             self.assertEqual(result, 0)
             mock_check_command.assert_called_once_with('python')
-            mock_run_tester.assert_called_once_with('python', ['server.py'], False, '2025-03-26')
+            mock_run_tester.assert_called_once_with('python', ['server.py'], False, '2025-06-18')
             self.assertIn("All STDIO tests passed", sys.stdout.getvalue())
         finally:
             # Restore stdout
@@ -67,7 +67,7 @@ class TestStdioCli(unittest.TestCase):
             # Verify
             self.assertEqual(result, 1)
             mock_check_command.assert_called_once()
-            mock_run_tester.assert_called_once_with('python', [], False, '2025-03-26')
+            mock_run_tester.assert_called_once_with('python', [], False, '2025-06-18')
             self.assertIn("Some STDIO tests failed", sys.stderr.getvalue())
         finally:
             # Restore stderr
@@ -117,7 +117,7 @@ class TestStdioCli(unittest.TestCase):
         # Verify
         self.assertEqual(result, 0)
         mock_check_command.assert_called_once_with('python')
-        mock_run_tester.assert_called_once_with('python', ['server.py'], False, '2025-03-26')
+        mock_run_tester.assert_called_once_with('python', ['server.py'], False, '2025-06-18')
         mock_makedirs.assert_called_once_with('/test/reports', exist_ok=True)
         mock_generate_report.assert_called_once()
         # Verify the report path and format
@@ -156,7 +156,7 @@ class TestStdioCli(unittest.TestCase):
         # Verify
         self.assertTrue(result)
         mock_tester_class.assert_called_once_with("python", [], False)
-        self.assertEqual(mock_tester.protocol_version, "2025-03-26")
+        self.assertEqual(mock_tester.protocol_version, "2025-06-18")
         mock_tester.run_all_tests.assert_called_once()
 
 

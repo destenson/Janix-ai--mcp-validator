@@ -231,7 +231,7 @@ class MCPStdioTester:
             Tuple of (success, tools_list)
         """
         logger.info("Listing tools")
-        success, response = self._send_request("listTools", {})
+        success, response = self._send_request("tools/list", {})
         
         if success and "result" in response and "tools" in response["result"]:
             tools = response["result"]["tools"]
@@ -250,23 +250,20 @@ class MCPStdioTester:
         test_message = "Hello, MCP STDIO server!"
         logger.info(f"Testing echo tool with message: '{test_message}'")
         
-        success, response = self._send_request("invokeToolCall", {
-            "toolCall": {
-                "id": "echo-test",
-                "name": "echo",
-                "parameters": {
-                    "message": test_message
-                }
+        success, response = self._send_request("tools/call", {
+            "name": "echo",
+            "arguments": {
+                "message": test_message
             }
         })
         
-        if success and "result" in response and "result" in response["result"]:
-            echo_result = response["result"]["result"]
-            if echo_result == test_message:
+        if success and "result" in response and "content" in response["result"]:
+            content = response["result"]["content"]
+            if isinstance(content, dict) and "echo" in content and content["echo"] == test_message:
                 logger.info("Echo tool test passed")
                 return True
             else:
-                logger.error(f"Echo tool returned unexpected result: {echo_result}")
+                logger.error(f"Echo tool returned unexpected result: {content}")
                 return False
         else:
             logger.error("Failed to invoke echo tool")
@@ -280,24 +277,21 @@ class MCPStdioTester:
         """
         logger.info("Testing add tool with numbers 5 and 7")
         
-        success, response = self._send_request("invokeToolCall", {
-            "toolCall": {
-                "id": "add-test",
-                "name": "add",
-                "parameters": {
-                    "a": 5,
-                    "b": 7
-                }
+        success, response = self._send_request("tools/call", {
+            "name": "add",
+            "arguments": {
+                "a": 5,
+                "b": 7
             }
         })
         
-        if success and "result" in response and "result" in response["result"]:
-            add_result = response["result"]["result"]
-            if add_result == 12:
+        if success and "result" in response and "content" in response["result"]:
+            content = response["result"]["content"]
+            if isinstance(content, dict) and "sum" in content and content["sum"] == 12:
                 logger.info("Add tool test passed")
                 return True
             else:
-                logger.error(f"Add tool returned unexpected result: {add_result}")
+                logger.error(f"Add tool returned unexpected result: {content}")
                 return False
         else:
             logger.error("Failed to invoke add tool")
@@ -313,27 +307,19 @@ class MCPStdioTester:
         logger.info(f"Testing async sleep tool with duration: {sleep_duration}s")
         
         # Start async tool call
-        success, response = self._send_request("invokeToolCall", {
-            "toolCall": {
-                "id": "sleep-test",
-                "name": "sleep",
-                "parameters": {
-                    "duration": sleep_duration
-                }
+        success, response = self._send_request("tools/call-async", {
+            "name": "sleep",
+            "arguments": {
+                "duration": sleep_duration
             }
         })
         
-        if not success or "result" not in response or "status" not in response["result"]:
+        if not success or "result" not in response or "id" not in response["result"]:
             logger.error("Failed to invoke async sleep tool")
             return False
         
-        # Check if status is running
-        if response["result"]["status"] != "running":
-            logger.error(f"Unexpected status from async tool: {response['result']['status']}")
-            return False
-        
         # Get tool call ID
-        tool_call_id = response["result"]["toolCallId"]
+        tool_call_id = response["result"]["id"]
         logger.debug(f"Async tool call started with ID: {tool_call_id}")
         
         # Poll for completion
@@ -341,24 +327,31 @@ class MCPStdioTester:
         max_wait = sleep_duration + 3  # Add buffer
         
         while time.time() - start_time < max_wait:
-            success, response = self._send_request("getToolCallStatus", {
-                "toolCallId": tool_call_id
+            success, response = self._send_request("tools/result", {
+                "id": tool_call_id
             })
             
-            if not success or "result" not in response or "status" not in response["result"]:
-                logger.error("Failed to get tool call status")
+            if not success or "result" not in response:
+                logger.error("Failed to get tool call result")
                 return False
             
-            status = response["result"]["status"]
-            logger.debug(f"Tool call status: {status}")
+            result = response["result"]
             
-            if status == "completed":
+            if "status" in result:
+                status = result["status"]
+                logger.debug(f"Tool call status: {status}")
+                
+                if status == "completed" and "result" in result:
+                    logger.info("Async sleep tool completed successfully")
+                    return True
+                
+                if status == "failed":
+                    logger.error("Async sleep tool failed")
+                    return False
+            elif "content" in result:
+                # Tool completed and returned result
                 logger.info("Async sleep tool completed successfully")
                 return True
-            
-            if status == "failed":
-                logger.error("Async sleep tool failed")
-                return False
             
             # Wait before polling again
             time.sleep(0.2)
@@ -434,12 +427,9 @@ class MCPStdioTester:
                                 test_params[prop_name] = {}
                 
                 # Test the tool
-                success, response = self._send_request("invokeToolCall", {
-                    "toolCall": {
-                        "id": f"{tool_name}-test",
-                        "name": tool_name,
-                        "parameters": test_params
-                    }
+                success, response = self._send_request("tools/call", {
+                    "name": tool_name,
+                    "arguments": test_params
                 })
                 
                 if not success or "result" not in response:

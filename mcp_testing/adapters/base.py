@@ -145,14 +145,14 @@ class MCPServerAdapter(ABC):
         Raises:
             RuntimeError: If the request fails
         """
-        response = await self.send_request("listTools", {})
+        response = await self.send_request("tools/list", {})
         
         if "error" in response:
             error_msg = response.get("error", {}).get("message", "Unknown error")
             raise RuntimeError(f"Failed to list tools: {error_msg}")
             
         if "result" not in response:
-            raise RuntimeError("Invalid listTools response, missing 'result' field")
+            raise RuntimeError("Invalid tools/list response, missing 'result' field")
             
         return response["result"]
         

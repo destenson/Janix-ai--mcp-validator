@@ -15,10 +15,10 @@ from typing import Dict, List, Optional
 
 from .tester import MCPStdioTester
 from .utils import check_command_exists, verify_python_server
-from mcp_testing.report import generate_report
+from mcp_testing.utils.reporter import generate_markdown_report
 
 
-def run_stdio_tester(server_command, args=None, debug=False, protocol_version="2025-03-26"):
+def run_stdio_tester(server_command, args=None, debug=False, protocol_version="2025-06-18"):
     """
     Run the STDIO tester against a server.
     
@@ -64,8 +64,8 @@ def main():
     
     parser.add_argument(
         "--protocol-version",
-        choices=["2024-11-05", "2025-03-26"],
-        default="2025-03-26",
+        choices=["2024-11-05", "2025-03-26", "2025-06-18"],
+        default="2025-06-18",
         help="MCP protocol version to test"
     )
     
@@ -121,7 +121,10 @@ def main():
         
         # Generate report
         report_file = os.path.join(args.output_dir, f"report.{args.report_format}")
-        generate_report(report_data, report_file, args.report_format)
+        if args.report_format == "text":
+            report_content = generate_markdown_report(report_data, args.server_command, args.protocol_version)
+            with open(report_file, 'w') as f:
+                f.write(report_content)
         
         print(f"\nReport generated at: {report_file}")
     

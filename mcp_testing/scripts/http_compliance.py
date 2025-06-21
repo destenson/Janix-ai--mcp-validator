@@ -72,8 +72,8 @@ class MCPHttpTester:
         self.endpoints = [
             f"{self.server_url}/mcp",           # SDK default message_path
             self.server_url,                    # Primary URL
-            f"{self.server_url}/messages",      # Messages endpoint
-            f"{self.server_url}/messages/",     # Messages endpoint with trailing slash
+            f"{self.server_url}/mcp",      # MCP endpoint
+            f"{self.server_url}/mcp/",     # MCP endpoint with trailing slash
         ]
         
         # Also try with trailing slash for SDK path
@@ -87,8 +87,8 @@ class MCPHttpTester:
                 f"{base_url}/mcp",              # SDK default path
                 f"{base_url}/mcp/",             # SDK default path with trailing slash
                 base_url,
-                f"{base_url}/messages",
-                f"{base_url}/messages/"
+                            f"{base_url}/mcp",
+            f"{base_url}/mcp/"
             ])
         
         # For SSE connection, also check the SDK default notification path

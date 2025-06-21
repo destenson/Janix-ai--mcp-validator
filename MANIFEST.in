@@ -2,14 +2,17 @@ include LICENSE.txt
 include README.md
 include CHANGELOG.md
 include CONTRIBUTING.md
-include SERVER_COMPATIBILITY.md
+include SECURITY.md
 include requirements.txt
 include .flake8
 
 recursive-include schema *.json
-recursive-include specification *.md
+recursive-include specification *.md *.csv
 recursive-include mcp_testing/server_configs *.json
 recursive-include mcp_testing/bin *
+recursive-include ref_gh_actions *.yml *.md
+recursive-include ref_http_server *.py
+recursive-include ref_stdio_server *.py *.md
 
 recursive-exclude reports *
 recursive-exclude .github *

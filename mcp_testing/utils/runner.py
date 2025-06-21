@@ -125,6 +125,12 @@ class MCPTestRunner:
                 transport=transport_adapter,
                 debug=self.debug
             )
+        elif protocol_version == "2025-06-18":
+            from mcp_testing.protocols.v2025_06_18 import MCP2025_06_18Adapter
+            protocol_adapter = MCP2025_06_18Adapter(
+                transport=transport_adapter,
+                debug=self.debug
+            )
         else:
             raise ValueError(f"Unsupported protocol version: {protocol_version}")
             

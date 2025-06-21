@@ -28,6 +28,12 @@ def run_http_tester(url, debug=False, protocol_version="2025-03-26"):
     Returns:
         True if all tests passed, False otherwise
     """
+    # Ensure URL ends with /mcp if it doesn't already have a path
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if not parsed.path or parsed.path == '/':
+        url = url.rstrip('/') + '/mcp'
+    
     tester = MCPHttpTester(url, debug)
     tester.protocol_version = protocol_version
     
@@ -50,8 +56,8 @@ def main():
     )
     parser.add_argument(
         "--protocol-version",
-        choices=["2024-11-05", "2025-03-26"],
-        default="2025-03-26",
+        choices=["2024-11-05", "2025-03-26", "2025-06-18"],
+        default="2025-06-18",
         help="MCP protocol version to test"
     )
     parser.add_argument(

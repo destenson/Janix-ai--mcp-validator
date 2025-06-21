@@ -16,6 +16,7 @@ Located in `./protocols/`:
 - **base.py**: Base protocol testing functionality
 - **v2024_11_05.py**: Tests for the 2024-11-05 protocol version
 - **v2025_03_26.py**: Tests for the 2025-03-26 protocol version
+- **v2025_06_18.py**: Tests for the 2025-06-18 protocol version
 
 ### 2. Transport Modules
 
@@ -116,7 +117,7 @@ See the subdirectory README files for more detailed information about each compo
 
 ## Overview
 
-This framework provides a set of tools and utilities for testing MCP servers against the protocol specifications. It supports both STDIO and HTTP transports, and can test implementations of both the 2024-11-05 and 2025-03-26 protocol versions.
+This framework provides a set of tools and utilities for testing MCP servers against the protocol specifications. It supports both STDIO and HTTP transports, and can test implementations of the 2024-11-05, 2025-03-26, and 2025-06-18 protocol versions.
 
 The framework is designed to be flexible and adapt to any MCP server implementation, regardless of what specific tools or capabilities it provides.
 
@@ -148,6 +149,7 @@ The `protocols` module provides adapters for different protocol versions:
 
 - `v2024_11_05.py`: Implementation for the 2024-11-05 protocol
 - `v2025_03_26.py`: Implementation for the 2025-03-26 protocol (with async tool support)
+- `v2025_06_18.py`: Implementation for the 2025-06-18 protocol (with structured output and elicitation)
 - `base.py`: Base class defining the protocol adapter interface
 
 ### Tests
@@ -198,7 +200,7 @@ python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp -
 #### HTTP Testing Options
 
 - `--server-url`: URL of the HTTP MCP server (required)
-- `--protocol-version`: Protocol version to test (2024-11-05 or 2025-03-26)
+- `--protocol-version`: Protocol version to test (2024-11-05, 2025-03-26, or 2025-06-18)
 - `--debug`: Enable debug output
 - `--max-retries`: Maximum number of connection retries
 - `--retry-interval`: Seconds to wait between connection retries
@@ -223,29 +225,29 @@ See the [HTTP Testing README](http/README.md) for more details.
 Our testing framework is designed to work with any MCP server implementation:
 
 ```bash
-# Basic testing with default settings
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --protocol-version 2025-03-26
+# Basic testing with default settings (latest protocol)
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --protocol-version 2025-06-18
 
 # Testing with dynamic adaptation to server capabilities
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --dynamic-only --protocol-version 2025-03-26
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --dynamic-only --protocol-version 2025-06-18
 
 # Testing a server that doesn't implement the shutdown method
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --skip-shutdown --protocol-version 2025-03-26
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --skip-shutdown --protocol-version 2025-06-18
 
 # Testing a specific subset of functionality
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-mode tools --protocol-version 2025-03-26
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-mode tools --protocol-version 2025-06-18
 
 # Passing additional arguments to the server
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --args "/path/to/directory" --protocol-version 2025-03-26
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --args "/path/to/directory" --protocol-version 2025-06-18
 
 # Running only specification compliance tests
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --spec-coverage-only --protocol-version 2025-03-26
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --spec-coverage-only --protocol-version 2025-06-18
 ```
 
 #### Options for Compliance Testing
 
 - `--server-command`: Command to start the server (required)
-- `--protocol-version`: Protocol version to test (2024-11-05 or 2025-03-26)
+- `--protocol-version`: Protocol version to test (2024-11-05, 2025-03-26, or 2025-06-18)
 - `--args`: Additional arguments to pass to the server command
 - `--dynamic-only`: Only run tests that adapt to the server's capabilities
 - `--skip-shutdown`: Skip the shutdown method (for servers that don't implement it)
@@ -278,13 +280,13 @@ The testing framework now includes specific tests for the MUST, SHOULD, and MAY 
 
 ```bash
 # Run all tests including specification coverage
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --protocol-version 2025-03-26
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --protocol-version 2025-06-18
 
 # Run only specification coverage tests
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --spec-coverage-only --protocol-version 2025-03-26
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --spec-coverage-only --protocol-version 2025-06-18
 
 # Run a subset of tests plus specification coverage
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-mode spec --protocol-version 2025-03-26
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-mode spec --protocol-version 2025-06-18
 ```
 
 The generated compliance report will include a section showing how well the server meets the specification requirements, broken down by MUST, SHOULD, and MAY categories:
