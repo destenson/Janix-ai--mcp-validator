@@ -6,6 +6,8 @@ A testing suite and reference implementation for the [Model Context Protocol (MC
 
 The MCP Protocol Validator provides a comprehensive environment for testing and validating MCP server implementations. It includes reference implementations and a testing framework to ensure compliance with the MCP specification.
 
+**Latest Protocol Support**: The validator now supports MCP protocol version **2025-06-18**, which includes major enhancements like structured tool output, elicitation support, removal of JSON-RPC batching, and enhanced error handling.
+
 
 ## STDIO Compliance Testing
 
@@ -14,7 +16,10 @@ The validator includes a comprehensive testing suite for STDIO-based MCP servers
 ### Running STDIO Tests
 
 ```bash
-# Run compliance tests for the STDIO server
+# Run compliance tests for the STDIO server (latest protocol)
+python -m mcp_testing.scripts.compliance_report --server-command "python ref_stdio_server/stdio_server_2025_03_26.py" --protocol-version 2025-06-18
+
+# Run with previous protocol versions
 python -m mcp_testing.scripts.compliance_report --server-command "python ref_stdio_server/stdio_server_2025_03_26.py" --protocol-version 2025-03-26
 ```
 
@@ -24,9 +29,14 @@ The STDIO compliance tests verify:
 1. Protocol Initialization
 2. Tools Functionality
    - Basic tools (echo, add)
-   - Async tools (sleep) for 2025-03-26 version
+   - Async tools (sleep) for 2025-03-26+ versions
+   - Structured tool output (2025-06-18)
 3. Error Handling
 4. Protocol Version Negotiation
+5. Advanced Features (2025-06-18)
+   - Elicitation support
+   - Enhanced validation
+   - JSON-RPC batching restrictions
 
 ### Testing Different STDIO Server Types
 
@@ -37,14 +47,17 @@ The validator supports testing any STDIO-based MCP server, whether it's run dire
 For servers that run directly from a Python file or command:
 
 ```bash
-# Test a local Python file
-python -m mcp_testing.scripts.compliance_report --server-command "python path/to/your/server.py" --protocol-version 2025-03-26
+# Test a local Python file (latest protocol)
+python -m mcp_testing.scripts.compliance_report --server-command "python path/to/your/server.py" --protocol-version 2025-06-18
 
 # Test with specific timeouts
-python -m mcp_testing.scripts.compliance_report --server-command "python path/to/server.py" --protocol-version 2025-03-26 --test-timeout 30 --tools-timeout 15
+python -m mcp_testing.scripts.compliance_report --server-command "python path/to/server.py" --protocol-version 2025-06-18 --test-timeout 30 --tools-timeout 15
 
 # Focus on tools testing with dynamic discovery
-python -m mcp_testing.scripts.compliance_report --server-command "python path/to/server.py" --protocol-version 2025-03-26 --test-mode tools --dynamic-only
+python -m mcp_testing.scripts.compliance_report --server-command "python path/to/server.py" --protocol-version 2025-06-18 --test-mode tools --dynamic-only
+
+# Test with previous protocol versions for compatibility
+python -m mcp_testing.scripts.compliance_report --server-command "python path/to/server.py" --protocol-version 2025-03-26
 ```
 
 #### Testing Pip-Installed Servers
@@ -99,25 +112,26 @@ Each test run generates a detailed report containing:
 You can run different types of tests using module-style commands:
 
 ```bash
-# Basic interaction test
-python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
+# Basic interaction test (latest protocol)
+python -m mcp_testing.scripts.basic_interaction --server-command "python -m mcp_server_fetch" --protocol-version 2025-06-18
 
 # Compliance tests with tools-only mode
-python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-mode tools
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2025-06-18 --test-mode tools
 
-<<<<<<< Updated upstream
 # Set custom timeouts for tools tests vs. other tests
-python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05 --test-timeout 30 --tools-timeout 15
-=======
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2025-06-18 --test-timeout 30 --tools-timeout 15
+
 # Test only specific functionality
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --test-mode tools
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --protocol-version 2025-06-18 --test-mode tools
 
 # Skip async tests if experiencing hanging issues
-python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --skip-async
+python -m mcp_testing.scripts.compliance_report --server-command "/path/to/server" --protocol-version 2025-06-18 --skip-async
 
 # HTTP debug output
 python -m mcp_testing.scripts.http_test --server-url http://localhost:8000/mcp --debug
->>>>>>> Stashed changes
+
+# Test backward compatibility with older protocols
+python -m mcp_testing.scripts.compliance_report --server-command "python -m mcp_server_fetch" --protocol-version 2024-11-05
 ```
 
 Note: Tool-related tests that timeout are treated as non-critical, allowing testing to continue.
@@ -142,10 +156,16 @@ The HTTP compliance test suite verifies:
 
 1. Protocol Initialization
 2. Tools Functionality
+   - Structured tool output (2025-06-18)
+   - Legacy tool responses (older protocols)
 3. Error Handling
+   - Enhanced error responses (2025-06-18)
 4. Batch Request Processing
+   - Batch request restrictions (2025-06-18)
+   - Legacy batch support (older protocols)
 5. Session Management
 6. Protocol Negotiation
+   - Multi-version support (2024-11-05, 2025-03-26, 2025-06-18)
 7. Ping Utility
 
 
@@ -155,7 +175,7 @@ The following scripts are available in `mcp_testing/scripts/`:
 
 ### Active and Maintained
 - `http_compliance_test.py`: Primary script for HTTP server testing (7/7 tests passing)
-- `compliance_report.py`: Primary script for STDIO server testing (36/37 tests passing)
+- `compliance_report.py`: Primary script for STDIO server testing with 2025-06-18 support (enhanced test coverage)
 
 ### Supporting Scripts mixed working/in progress
 - `basic_interaction.py`: Simple tool for testing basic server functionality

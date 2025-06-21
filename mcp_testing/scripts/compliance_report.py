@@ -50,12 +50,14 @@ from mcp_testing.tests.features.test_tools import TEST_CASES as TOOLS_TEST_CASES
 from mcp_testing.tests.features.test_async_tools import TEST_CASES as ASYNC_TOOLS_TEST_CASES
 from mcp_testing.tests.features.dynamic_tool_tester import TEST_CASES as DYNAMIC_TOOL_TEST_CASES
 from mcp_testing.tests.features.dynamic_async_tools import TEST_CASES as DYNAMIC_ASYNC_TEST_CASES
+from mcp_testing.tests.features.test_2025_06_18 import TEST_CASES as TEST_2025_06_18_CASES
 from mcp_testing.tests.specification_coverage import TEST_CASES as SPEC_COVERAGE_TEST_CASES
 
 # Imports for adapters
 from mcp_testing.transports.stdio import StdioTransportAdapter
 from mcp_testing.protocols.v2024_11_05 import MCP2024_11_05Adapter
 from mcp_testing.protocols.v2025_03_26 import MCP2025_03_26Adapter
+from mcp_testing.protocols.v2025_06_18 import MCP2025_06_18Adapter
 from mcp_testing.protocols.base import MCPProtocolAdapter
 
 # Import server compatibility utilities
@@ -194,6 +196,11 @@ class VerboseTestRunner:
                         transport=transport_adapter,
                         debug=self.debug
                     )
+                elif protocol == "2025-06-18":
+                    protocol_adapter = MCP2025_06_18Adapter(
+                        transport=transport_adapter,
+                        debug=self.debug
+                    )
                 else:
                     raise ValueError(f"Unsupported protocol version: {protocol}")
 
@@ -287,7 +294,12 @@ async def main():
     """Run the compliance tests and generate a report."""
     parser = argparse.ArgumentParser(description="Generate a compliance report for an MCP server.")
     parser.add_argument("--server-command", required=True, help="Command to start the server")
-    parser.add_argument("--protocol-version", required=True, help="Protocol version to test against")
+    parser.add_argument(
+        "--protocol-version", 
+        choices=["2024-11-05", "2025-03-26", "2025-06-18"],
+        default="2025-06-18",
+        help="Protocol version to test against"
+    )
     parser.add_argument("--server-config", help="Path to server configuration file")
     parser.add_argument("--args", help="Additional arguments to pass to the server")
     parser.add_argument("--output-dir", default="reports", help="Directory to store reports")
@@ -410,8 +422,12 @@ async def main():
         if args.test_mode in ["all", "tools"]:
             tests.extend(TOOLS_TEST_CASES)
             
-        if args.test_mode in ["all", "async"] and args.protocol_version == "2025-03-26" and not args.skip_async:
+        if args.test_mode in ["all", "async"] and args.protocol_version in ["2025-03-26", "2025-06-18"] and not args.skip_async:
             tests.extend(ASYNC_TOOLS_TEST_CASES)
+            
+        # Add 2025-06-18 specific tests
+        if args.protocol_version == "2025-06-18":
+            tests.extend(TEST_2025_06_18_CASES)
             
         if args.test_mode in ["all", "spec"]:
             tests.extend(SPEC_COVERAGE_TEST_CASES)

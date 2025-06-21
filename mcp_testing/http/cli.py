@@ -50,8 +50,8 @@ def main():
     )
     parser.add_argument(
         "--protocol-version",
-        choices=["2024-11-05", "2025-03-26"],
-        default="2025-03-26",
+        choices=["2024-11-05", "2025-03-26", "2025-06-18"],
+        default="2025-06-18",
         help="MCP protocol version to test"
     )
     parser.add_argument(

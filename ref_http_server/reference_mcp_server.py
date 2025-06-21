@@ -50,6 +50,7 @@ class ServerCapabilities(BaseModel):
     prompts: Dict[str, bool] = {"listChanged": True}
     resources: Dict[str, bool] = {"subscribe": True, "listChanged": True}
     tools: Dict[str, bool] = {"listChanged": True}
+    elicitation: Optional[Dict[str, Any]] = {}  # New in 2025-06-18
 
 class InitializeParams(BaseModel):
     """Parameters for initialize request."""
@@ -90,8 +91,9 @@ class ToolDescription(BaseModel):
     """Description of a tool."""
     name: str
     description: str
-    parameters: Dict[str, Any]
-    returns: Dict[str, Any]
+    inputSchema: Dict[str, Any]  # Renamed from parameters in 2025-06-18
+    title: Optional[str] = None  # New in 2025-06-18
+    outputSchema: Optional[Dict[str, Any]] = None  # New in 2025-06-18
 
 class CallToolParams(BaseModel):
     """Parameters for calling a tool."""
@@ -100,7 +102,9 @@ class CallToolParams(BaseModel):
 
 class CallToolResult(BaseModel):
     """Result of calling a tool."""
-    output: Any
+    content: List[Dict[str, Any]]
+    isError: bool = False
+    structuredContent: Optional[Dict[str, Any]] = None  # New in 2025-06-18
 
 # Reference MCP Server Implementation
 class McpReferenceServer:
@@ -113,25 +117,35 @@ class McpReferenceServer:
         self.sessions: Dict[str, Dict[str, Any]] = {}
         self.tools: Dict[str, Dict[str, Any]] = {}
         
-        # Register built-in tools
+        # Check if we support 2025-06-18 features
+        self.supports_2025_06_18 = "2025-06-18" in protocol_versions
+        
+        # Register built-in tools with 2025-06-18 format
         self.register_tool(
             name="echo",
             description="Echo a message back to the client.",
-            parameters={
+            title="Echo Tool",  # New in 2025-06-18
+            input_schema={
                 "type": "object",
                 "properties": {
                     "message": {"type": "string", "description": "Message to echo back"}
                 },
                 "required": ["message"]
             },
-            returns={"type": "string", "description": "The echoed message"},
+            output_schema={  # New in 2025-06-18
+                "type": "object",
+                "properties": {
+                    "echo": {"type": "string", "description": "The echoed message"}
+                }
+            } if self.supports_2025_06_18 else None,
             handler=self._echo_tool
         )
         
         self.register_tool(
             name="add",
             description="Add two numbers and return the result.",
-            parameters={
+            title="Addition Tool",  # New in 2025-06-18
+            input_schema={
                 "type": "object",
                 "properties": {
                     "a": {"type": "number", "description": "First number"},
@@ -139,34 +153,56 @@ class McpReferenceServer:
                 },
                 "required": ["a", "b"]
             },
-            returns={"type": "number", "description": "Sum of a and b"},
+            output_schema={  # New in 2025-06-18
+                "type": "object",
+                "properties": {
+                    "sum": {"type": "number", "description": "Sum of a and b"}
+                }
+            } if self.supports_2025_06_18 else None,
             handler=self._add_tool
         )
         
         self.register_tool(
             name="sleep",
             description="Sleep for the specified number of seconds.",
-            parameters={
+            title="Sleep Tool",  # New in 2025-06-18
+            input_schema={
                 "type": "object",
                 "properties": {
                     "seconds": {"type": "number", "description": "Number of seconds to sleep"}
                 },
                 "required": ["seconds"]
             },
-            returns={"type": "string", "description": "Confirmation message"},
+            output_schema={  # New in 2025-06-18
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "Confirmation message"}
+                }
+            } if self.supports_2025_06_18 else None,
             handler=self._sleep_tool
         )
     
-    def register_tool(self, name: str, description: str, parameters: Dict[str, Any], 
-                    returns: Dict[str, Any], handler: callable):
+    def register_tool(self, name: str, description: str, input_schema: Dict[str, Any], 
+                    handler: callable, title: str = None, output_schema: Dict[str, Any] = None):
         """Register a new tool with the server."""
-        self.tools[name] = {
+        tool_def = {
             "name": name,
             "description": description,
-            "parameters": parameters,
-            "returns": returns,
+            "inputSchema": input_schema,  # Updated for 2025-06-18
             "handler": handler
         }
+        
+        # Add 2025-06-18 specific fields if supported
+        if self.supports_2025_06_18:
+            if title:
+                tool_def["title"] = title
+            if output_schema:
+                tool_def["outputSchema"] = output_schema
+        else:
+            # Backward compatibility - keep old field names for older protocols
+            tool_def["parameters"] = input_schema
+            
+        self.tools[name] = tool_def
     
     async def initialize(self, params: InitializeParams) -> InitializeResult:
         """Handle initialize request from client."""
@@ -222,16 +258,25 @@ class McpReferenceServer:
         # Validate session
         self.get_session(session_id)
         
-        # Return tool descriptions
-        return [
-            ToolDescription(
+        # Return tool descriptions based on protocol version
+        tools = []
+        for tool in self.tools.values():
+            tool_desc = ToolDescription(
                 name=tool["name"],
                 description=tool["description"],
-                parameters=tool["parameters"],
-                returns=tool["returns"]
+                inputSchema=tool["inputSchema"]
             )
-            for tool in self.tools.values()
-        ]
+            
+            # Add 2025-06-18 specific fields if supported
+            if self.supports_2025_06_18:
+                if "title" in tool:
+                    tool_desc.title = tool["title"]
+                if "outputSchema" in tool:
+                    tool_desc.outputSchema = tool["outputSchema"]
+            
+            tools.append(tool_desc)
+        
+        return tools
     
     async def call_tool(self, session_id: str, params: CallToolParams) -> CallToolResult:
         """Call a tool with the provided parameters."""
@@ -252,13 +297,48 @@ class McpReferenceServer:
         try:
             # Call tool handler
             result = await tool["handler"](**params.parameters)
-            return CallToolResult(output=result)
+            
+            # Format result based on protocol version
+            if self.supports_2025_06_18:
+                # 2025-06-18 format with structured content
+                content = [{"type": "text", "text": str(result)}]
+                structured_content = None
+                
+                # If the tool has an output schema, create structured content
+                if "outputSchema" in tool and isinstance(result, (dict, list)):
+                    structured_content = result
+                elif tool_name == "add" and isinstance(result, (int, float)):
+                    structured_content = {"sum": result}
+                elif tool_name == "echo" and isinstance(result, str):
+                    structured_content = {"echo": result}
+                elif tool_name == "sleep" and isinstance(result, str):
+                    structured_content = {"message": result}
+                
+                return CallToolResult(
+                    content=content,
+                    isError=False,
+                    structuredContent=structured_content
+                )
+            else:
+                # Legacy format for older protocols
+                return CallToolResult(
+                    content=[{"type": "text", "text": str(result)}],
+                    isError=False
+                )
+                
         except Exception as e:
             logger.error(f"Error calling tool {tool_name}: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Tool execution error: {str(e)}"
-            )
+            
+            if self.supports_2025_06_18:
+                return CallToolResult(
+                    content=[{"type": "text", "text": f"Tool execution error: {str(e)}"}],
+                    isError=True
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Tool execution error: {str(e)}"
+                )
     
     # Tool implementations
     async def _echo_tool(self, message: str) -> str:
@@ -415,7 +495,7 @@ app.add_middleware(
 # Create MCP server instance
 mcp_server = McpReferenceServer(
     name="MCP Reference Server",
-    protocol_versions=["2025-03-26"]
+    protocol_versions=["2024-11-05", "2025-03-26", "2025-06-18"]  # Added 2025-06-18 support
 )
 
 # Handle HTTP methods
@@ -426,8 +506,22 @@ async def handle_post_message(request: Request):
         data = await request.json()
         logger.debug(f"Received message: {data}")
         
-        # Handle batch requests
+        # Handle batch requests (not supported in 2025-06-18)
         if isinstance(data, list):
+            # Check if 2025-06-18 protocol is being used
+            protocol_version = request.headers.get("MCP-Protocol-Version", "")
+            if protocol_version == "2025-06-18":
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "jsonrpc": "2.0",
+                        "error": {
+                            "code": -32600,
+                            "message": "JSON-RPC batching is not supported in protocol version 2025-06-18"
+                        }
+                    }
+                )
+            
             try:
                 responses = []
                 for request_item in data:
