@@ -5,7 +5,7 @@ name: MCP STDIO Protocol Validation
 
 on:
   pull_request:
-    branches: [ main ]  # Adjust branch names as needed
+    branches: [ main, master ]  # Adjust branch names as needed
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
@@ -15,8 +15,8 @@ jobs:
     
     strategy:
       matrix:
-        # Add or modify protocol versions as needed
-        protocol-version: ["2025-03-26"]
+        # Test against multiple protocol versions including the latest 2025-06-18
+        protocol-version: ["2025-03-26", "2025-06-18"]
         # Optionally test multiple Python versions
         # python-version: ['3.10', '3.11', '3.12']
     
@@ -59,17 +59,17 @@ jobs:
           chmod +x "$SERVER_PATH"
           
           # Run compliance tests with the STDIO server
-          python -m mcp_testing.scripts.compliance_report \
-            --server-command "python $SERVER_PATH" \
+          python -m mcp_testing.stdio.cli \
+            "python $SERVER_PATH" \
             --protocol-version ${{ matrix.protocol-version }} \
             --output-dir reports \
-            --test-timeout 30 \
-            --tools-timeout 15
+            --timeout 30 \
+            --debug
           
           # Store the exit code
           TEST_EXIT_CODE=$?
           
-          # Additional options:
+          # Additional options for 2025-06-18:
           # --test-mode tools         # Focus on testing tool functionality
           # --dynamic-only            # Auto-discover and test available tools
           # --required-tools tool1,tool2  # Test specific tools
@@ -98,7 +98,7 @@ jobs:
               const reportFiles = fs.readdirSync('reports');
               const jsonReportFile = reportFiles.find(file => file.endsWith('.json'));
               
-              let summary = "## MCP STDIO Validation Results\n\n";
+              let summary = `## MCP STDIO Validation Results (${{ matrix.protocol-version }})\n\n`;
               
               if (jsonReportFile) {
                 const reportData = JSON.parse(fs.readFileSync(`reports/${jsonReportFile}`, 'utf8'));
