@@ -1,6 +1,6 @@
-# GitHub Actions for MCP Protocol Validator
+# GitHub Actions for MCP Validator
 
-This guide explains how to set up GitHub Actions to automate compliance testing for MCP server implementations using your existing MCP Protocol Validator repository.
+This guide explains how to set up GitHub Actions to automate compliance testing for MCP server implementations using your existing MCP Validator repository.
 
 ## Overview
 
@@ -159,10 +159,10 @@ As your needs grow, you can extend these workflows to:
 
 ## Additional Resources
 
-- Refer to the [MCP Protocol Validator documentation](https://github.com/modelcontextprotocol) for details on test scripts and options
+- Refer to the [MCP Validator documentation](https://github.com/modelcontextprotocol) for details on test scripts and options
 - See [GitHub Actions documentation](https://docs.github.com/en/actions) for more information on GitHub Actions features
 
 ## License
 
-These GitHub Actions workflows are provided under the same license as the MCP Protocol Validator:
+These GitHub Actions workflows are provided under the same license as the MCP Validator:
 SPDX-License-Identifier: AGPL-3.0-or-later 

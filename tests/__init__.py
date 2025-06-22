@@ -1,3 +1,3 @@
 """
-Unit tests for the MCP Protocol Validator codebase.
+Unit tests for the MCP Validator codebase.
 """ 
