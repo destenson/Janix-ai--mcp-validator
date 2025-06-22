@@ -1,4 +1,4 @@
-# MCP Protocol Validator Dependencies
+# MCP Validator Dependencies
 
 # Core dependencies
 requests>=2.31.0

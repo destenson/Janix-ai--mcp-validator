@@ -1,4 +1,4 @@
-name: MCP Protocol Validator CI
+name: MCP Validator CI
 
 on:
   push:

@@ -57,7 +57,7 @@ MCP_DEBUG=true ./stdio_server_2024_11_05.py
 MCP_DEBUG=true ./stdio_server_2025_03_26.py
 ```
 
-### Testing with the MCP Protocol Validator
+### Testing with the MCP Validator
 
 The server can be tested with the official MCP Testing Framework:
 

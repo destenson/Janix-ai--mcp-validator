@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-We currently provide security updates for the following versions of the MCP Protocol Validator:
+We currently provide security updates for the following versions of the MCP Validator:
 
 | Version | Supported          |
 | ------- | ------------------ |
@@ -10,7 +10,7 @@ We currently provide security updates for the following versions of the MCP Prot
 
 ## Reporting a Vulnerability
 
-The MCP Protocol Validator team takes security seriously. If you believe you've found a security vulnerability, please follow these steps:
+The MCP Validator team takes security seriously. If you believe you've found a security vulnerability, please follow these steps:
 
 1. **Do not disclose the vulnerability publicly**
 2. **Email us directly** at [scott@janix.ai](mailto:scott@janix.ai) with details about the vulnerability
@@ -34,9 +34,9 @@ We are committed to the following response process:
 
 ## Security Best Practices
 
-When using the MCP Protocol Validator in your own projects, we recommend the following security best practices:
+When using the MCP Validator in your own projects, we recommend the following security best practices:
 
-1. **Keep your dependencies updated**: Regularly update the MCP Protocol Validator and its dependencies to benefit from security patches
+1. **Keep your dependencies updated**: Regularly update the MCP Validator and its dependencies to benefit from security patches
 2. **Use caution with file operations**: When using the file operation tools in the MCP servers, be aware of potential security implications in your specific environment
 3. **Control network access**: When using the HTTP MCP server, ensure it's only accessible to trusted clients or over secure networks
 
@@ -45,4 +45,4 @@ When using the MCP Protocol Validator in your own projects, we recommend the fol
 We follow responsible disclosure principles. After a fix has been developed and released, we encourage security researchers to disclose the vulnerability in a responsible manner, giving users time to update their installations. We will credit security researchers who report valid vulnerabilities and work with us through the entire process.
 
 
-Thank you for helping to keep the MCP Protocol Validator and its users secure! 
+Thank you for helping to keep the MCP Validator and its users secure! 

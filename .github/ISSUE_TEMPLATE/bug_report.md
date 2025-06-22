@@ -26,7 +26,7 @@ Paste any relevant logs or error messages here
 **Environment (please complete the following information):**
  - OS: [e.g. macOS, Ubuntu, Windows]
  - Python version: [e.g. 3.10.4]
- - MCP Protocol Validator version: [e.g. 1.0.0]
+ - MCP Validator version: [e.g. 1.0.0]
  - Server being tested: [e.g. minimal_mcp_server, fetch server]
  - Protocol version: [e.g. 2024-11-05, 2025-03-26]
 
