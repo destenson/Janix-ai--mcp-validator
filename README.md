@@ -4,7 +4,7 @@ A testing suite and reference implementation for the [Model Context Protocol (MC
 
 ## Summary
 
-The MCP Protocol Validator provides a comprehensive environment for testing and validating MCP server implementations. It includes reference implementations and a testing framework to ensure compliance with the MCP specification.
+The MCP Validator provides a comprehensive environment for testing and validating MCP server implementations. It includes reference implementations and a testing framework to ensure compliance with the MCP specification.
 
 **Latest Protocol Support**: The validator now supports MCP protocol version **2025-06-18**, which includes major enhancements like structured tool output, OAuth 2.1 authentication, elicitation support, removal of JSON-RPC batching, and enhanced security features.
 
