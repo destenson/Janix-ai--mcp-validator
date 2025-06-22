@@ -1,4 +1,4 @@
-# MCP Protocol Validator
+# MCP Validator
 
 A testing suite and reference implementation for the [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol).
 
