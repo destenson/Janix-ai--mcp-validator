@@ -1,4 +1,4 @@
-# MCP Protocol Validator Release Notes
+# MCP Validator Release Notes
 
 ## v0.3.0 - 2025-01-21
 
