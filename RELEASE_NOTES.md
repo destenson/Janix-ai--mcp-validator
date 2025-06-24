@@ -1,6 +1,6 @@
 # MCP Validator Release Notes
 
-## v0.3.0 - 2025-06-22
+## v0.3.0 - 2025-06-21
 
 ### 🚀 Major Release: Full MCP 2025-06-18 Protocol Support
 
