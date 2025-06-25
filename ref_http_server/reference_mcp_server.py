@@ -473,11 +473,37 @@ class McpReferenceServer:
         if "id" in data:
             response["id"] = data["id"]
         
+        # Validate JSON-RPC structure first
+        if not isinstance(data, dict):
+            response["error"] = {
+                "code": -32700,  # Parse error
+                "message": "Parse error: Invalid JSON"
+            }
+            response["id"] = None
+            return JSONResponse(status_code=400, content=response)
+        
+        # Check for required JSON-RPC fields
+        if "jsonrpc" not in data or data.get("jsonrpc") != "2.0":
+            response["error"] = {
+                "code": -32600,  # Invalid Request
+                "message": "Invalid Request: Missing or invalid jsonrpc field"
+            }
+            response["id"] = data.get("id", None)
+            return JSONResponse(status_code=400, content=response)
+        
+        if "method" not in data:
+            response["error"] = {
+                "code": -32600,  # Invalid Request
+                "message": "Invalid Request: Missing method field"
+            }
+            response["id"] = data.get("id", None)
+            return JSONResponse(status_code=400, content=response)
+        
         # Handle initialize request (no session required)
         if data["method"] == "initialize":
             if "params" not in data:
                 response["error"] = {
-                    "code": -32602,
+                    "code": -32602,  # Invalid params
                     "message": "Missing params for initialize"
                 }
                 return JSONResponse(status_code=400, content=response)
@@ -493,15 +519,15 @@ class McpReferenceServer:
             except Exception as e:
                 logger.error(f"Error handling initialize: {e}")
                 response["error"] = {
-                    "code": -32603,
+                    "code": -32603,  # Internal error
                     "message": str(e)
                 }
-                return JSONResponse(content=response)
+                return JSONResponse(status_code=500, content=response)
         
         # For all other requests, session ID is required
         if not session_id:
             response["error"] = {
-                "code": -32602,
+                "code": -32602,  # Invalid params
                 "message": "Missing session_id query parameter"
             }
             return JSONResponse(status_code=400, content=response)
@@ -511,10 +537,10 @@ class McpReferenceServer:
             self.get_session(session_id)
         except HTTPException:
             response["error"] = {
-                "code": -32000,
-                "message": f"Session not found: {session_id}"
+                "code": -32003,  # Session expired (custom error code)
+                "message": f"Invalid or expired session: {session_id}"
             }
-            return JSONResponse(status_code=404, content=response)
+            return JSONResponse(status_code=401, content=response)  # 401 Unauthorized for invalid session
         
         # Handle notifications (no ID)
         if "id" not in data:
@@ -540,7 +566,7 @@ class McpReferenceServer:
             elif method == "tools/call":
                 if "params" not in data:
                     response["error"] = {
-                        "code": -32602,
+                        "code": -32602,  # Invalid params
                         "message": "Missing params for tools/call"
                     }
                     return JSONResponse(status_code=400, content=response)
@@ -550,7 +576,7 @@ class McpReferenceServer:
                 # Validate that params is a dictionary
                 if not isinstance(tool_params, dict):
                     response["error"] = {
-                        "code": -32602,
+                        "code": -32602,  # Invalid params
                         "message": f"Invalid params type for tools/call: expected object, got {type(tool_params).__name__}"
                     }
                     return JSONResponse(status_code=400, content=response)
@@ -558,14 +584,14 @@ class McpReferenceServer:
                 # Validate required fields
                 if "name" not in tool_params:
                     response["error"] = {
-                        "code": -32602,
+                        "code": -32602,  # Invalid params
                         "message": "Missing 'name' field in tools/call params"
                     }
                     return JSONResponse(status_code=400, content=response)
                 
                 if "arguments" not in tool_params:
                     response["error"] = {
-                        "code": -32602,
+                        "code": -32602,  # Invalid params
                         "message": "Missing 'arguments' field in tools/call params"
                     }
                     return JSONResponse(status_code=400, content=response)
@@ -573,7 +599,7 @@ class McpReferenceServer:
                 # Validate arguments is a dictionary
                 if not isinstance(tool_params["arguments"], dict):
                     response["error"] = {
-                        "code": -32602,
+                        "code": -32602,  # Invalid params
                         "message": f"Invalid arguments type for tools/call: expected object, got {type(tool_params['arguments']).__name__}"
                     }
                     return JSONResponse(status_code=400, content=response)
@@ -587,7 +613,7 @@ class McpReferenceServer:
                     response["result"] = result.model_dump()
                 except ValidationError as e:
                     response["error"] = {
-                        "code": -32602,
+                        "code": -32602,  # Invalid params
                         "message": f"Invalid tool call parameters: {str(e)}"
                     }
                     return JSONResponse(status_code=400, content=response)
@@ -596,27 +622,28 @@ class McpReferenceServer:
                 response["result"] = {"timestamp": datetime.now().isoformat()}
             
             else:
+                # Method not found - this should return 404 per JSON-RPC over HTTP best practices
                 response["error"] = {
-                    "code": -32601,
+                    "code": -32601,  # Method not found
                     "message": f"Method not found: {method}"
                 }
-                return JSONResponse(status_code=400, content=response)
+                return JSONResponse(status_code=404, content=response)  # 404 Not Found for unknown method
             
             return JSONResponse(content=response)
             
         except HTTPException as e:
             response["error"] = {
-                "code": -32000,
+                "code": -32000,  # Server error
                 "message": e.detail
             }
             return JSONResponse(status_code=e.status_code, content=response)
         except Exception as e:
             logger.error(f"Error handling {method}: {e}")
             response["error"] = {
-                "code": -32603,
+                "code": -32603,  # Internal error
                 "message": str(e)
             }
-            return JSONResponse(content=response)
+            return JSONResponse(status_code=500, content=response)  # 500 for internal errors
 
 # Create FastAPI application
 app = FastAPI(
@@ -651,8 +678,25 @@ async def handle_post_message(request: Request,
         if not session_id:
             session_id = request.headers.get("Mcp-Session-Id")
         
-        # Get request body
-        body = await request.json()
+        # Get request body as text first to handle JSON parsing ourselves
+        body_text = await request.body()
+        
+        # Try to parse JSON
+        try:
+            body = json.loads(body_text.decode())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # Parse error - return 400 with JSON-RPC error
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32700,  # Parse error
+                        "message": "Parse error: Invalid JSON"
+                    },
+                    "id": None
+                }
+            )
         
         # Check for batch requests (arrays) and reject them for 2025-06-18
         if isinstance(body, list):
@@ -672,7 +716,7 @@ async def handle_post_message(request: Request,
                     content={
                         "jsonrpc": "2.0",
                         "error": {
-                            "code": -32600,
+                            "code": -32600,  # Invalid Request
                             "message": "Batch requests are not supported in protocol version 2025-06-18"
                         },
                         "id": None
@@ -686,7 +730,7 @@ async def handle_post_message(request: Request,
                 content={
                     "jsonrpc": "2.0",
                     "error": {
-                        "code": -32600,
+                        "code": -32600,  # Invalid Request
                         "message": "Batch requests are not supported by this server"
                     },
                     "id": None
@@ -702,18 +746,6 @@ async def handle_post_message(request: Request,
         
         return response
         
-    except json.JSONDecodeError:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "jsonrpc": "2.0",
-                "error": {
-                    "code": -32700,
-                    "message": "Parse error"
-                },
-                "id": None
-            }
-        )
     except Exception as e:
         logger.error(f"Error handling POST message: {str(e)}")
         return JSONResponse(
@@ -721,7 +753,7 @@ async def handle_post_message(request: Request,
             content={
                 "jsonrpc": "2.0",
                 "error": {
-                    "code": -32603,
+                    "code": -32603,  # Internal error
                     "message": "Internal error",
                     "data": str(e)
                 },
@@ -757,12 +789,12 @@ async def handle_get_message(request: Request,
     except HTTPException as e:
         if e.status_code == 404:
             return JSONResponse(
-                status_code=404,
+                status_code=401,  # 401 Unauthorized for invalid session
                 content={
                     "jsonrpc": "2.0",
                     "error": {
-                        "code": -32001,
-                        "message": "Session not found"
+                        "code": -32003,  # Session expired
+                        "message": "Invalid or expired session"
                     },
                     "id": None
                 }

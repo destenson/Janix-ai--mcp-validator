@@ -26,12 +26,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger("mcp-http-compliance-test")
 
+# Standard JSON-RPC error codes
+PARSE_ERROR = -32700  # Invalid JSON
+INVALID_REQUEST = -32600  # Not a valid Request object
+METHOD_NOT_FOUND = -32601  # Method doesn't exist/not available
+INVALID_PARAMS = -32602  # Invalid method parameters
+INTERNAL_ERROR = -32603  # Internal JSON-RPC error
+
+# Server error codes
+SERVER_ERROR = -32000  # Generic server error
+SERVER_OVERLOADED = -32001  # Server temporarily unable to handle request
+RATE_LIMIT_EXCEEDED = -32002  # Too many requests
+SESSION_EXPIRED = -32003  # Session/auth expired
+
 class McpHttpComplianceTest:
     """Tests MCP HTTP servers against the specification."""
     
     def __init__(self, server_url: str, debug: bool = False):
         """Initialize the tester."""
-        self.server_url = server_url.rstrip("/")
+        # Remove trailing /mcp if present to avoid double-appending
+        self.server_url = server_url.rstrip("/").removesuffix("/mcp")
         self.debug = debug
         self.client = httpx.Client(follow_redirects=True)
         self.session_id = None
@@ -380,7 +394,7 @@ class McpHttpComplianceTest:
             return False
     
     def test_error_handling(self) -> bool:
-        """Test error handling."""
+        """Test error handling according to JSON-RPC 2.0 and HTTP standards."""
         logger.info("Testing error handling")
         
         if not self.session_id:
@@ -396,93 +410,122 @@ class McpHttpComplianceTest:
                 "Content-Type": "application/json"
             }
             
-            # Test 1: Invalid method
-            invalid_method_payload = {
-                "jsonrpc": "2.0",
-                "id": 4,
-                "method": "non_existent_method"
-            }
-            
-            invalid_method_response = self.client.post(
-                url,
-                json=invalid_method_payload,
-                headers=headers
-            )
-            
-            # Should still return 200 but with error in response
-            if invalid_method_response.status_code != 200:
-                logger.warning(f"Invalid method expected 200 status, got {invalid_method_response.status_code}")
-            
-            invalid_method_data = invalid_method_response.json()
-            
-            if "error" not in invalid_method_data:
-                self.results["error_handling"] = {
-                    "status": "failed",
-                    "error": "Server did not return error for invalid method",
-                    "response": invalid_method_data
+            tests = [
+                {
+                    "name": "parse_error",
+                    "payload": "{ this is not valid JSON",
+                    "expected_code": 400,  # Bad Request for malformed JSON
+                    "expected_json_rpc_error": PARSE_ERROR,  # -32700
+                    "headers": {"Content-Type": "application/json"}
+                },
+                {
+                    "name": "invalid_request", 
+                    "payload": {"jsonrpc": "2.0", "id": 1},  # Missing method
+                    "expected_code": 400,  # Bad Request for invalid request structure
+                    "expected_json_rpc_error": INVALID_REQUEST,  # -32600
+                    "headers": {"Content-Type": "application/json"}
+                },
+                {
+                    "name": "method_not_found",
+                    "payload": {"jsonrpc": "2.0", "id": 1, "method": "unknown_method"},
+                    "expected_code": 404,  # Not Found for unknown method
+                    "expected_json_rpc_error": METHOD_NOT_FOUND,  # -32601
+                    "headers": {"Content-Type": "application/json"}
+                },
+                {
+                    "name": "invalid_params",
+                    "payload": {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": "invalid"},
+                    "expected_code": 400,  # Bad Request for invalid parameters
+                    "expected_json_rpc_error": INVALID_PARAMS,  # -32602
+                    "headers": {"Content-Type": "application/json"}
+                },
+                {
+                    "name": "session_expired",
+                    "payload": {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                    "expected_code": 401,  # Unauthorized for invalid/expired session
+                    "expected_json_rpc_error": SESSION_EXPIRED,  # -32003
+                    "headers": {"Content-Type": "application/json", "Mcp-Session-Id": "invalid-session-id"}
                 }
-                return False
+            ]
             
-            error = invalid_method_data["error"]
-            if "code" not in error or error["code"] != -32601:  # Method not found
-                logger.warning(f"Expected error code -32601 for method not found, got {error.get('code')}")
+            all_passed = True
+            test_results = []
             
-            # Test 2: Invalid params
-            if "echo" in self.results.get("tools_functionality", {}).get("available_tools", []):
-                invalid_params_payload = {
-                    "jsonrpc": "2.0",
-                    "id": 5,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "echo",
-                        # Missing required 'arguments' field
-                    }
-                }
+            for test in tests:
+                logger.info(f"Running error test: {test['name']}")
                 
-                invalid_params_response = self.client.post(
-                    url,
-                    json=invalid_params_payload,
-                    headers=headers
-                )
+                # Special URL for session_expired test
+                test_url = f"{self.server_url}/mcp" if test["name"] == "session_expired" else url
+                test_headers = test.get("headers", headers)
                 
-                invalid_params_data = invalid_params_response.json()
-                
-                if "error" not in invalid_params_data:
-                    self.results["error_handling"] = {
-                        "status": "failed",
-                        "error": "Server did not return error for invalid params",
-                        "response": invalid_params_data
-                    }
-                    return False
-                
-                error = invalid_params_data["error"]
-                if "code" not in error or error["code"] != -32602:  # Invalid params
-                    logger.warning(f"Expected error code -32602 for invalid params, got {error.get('code')}")
-            
-            # Test 3: Invalid JSON
-            invalid_json_response = self.client.post(
-                url,
-                content="{ this is not valid JSON",
-                headers=headers
-            )
-            
-            # Should return 400 Bad Request for invalid JSON
-            if invalid_json_response.status_code != 400:
-                logger.warning(f"Invalid JSON expected 400 status, got {invalid_json_response.status_code}")
+                try:
+                    if isinstance(test["payload"], str):
+                        # Raw string payload (invalid JSON)
+                        response = self.client.post(
+                            test_url,
+                            content=test["payload"],
+                            headers=test_headers
+                        )
+                    else:
+                        # JSON payload
+                        response = self.client.post(
+                            test_url,
+                            json=test["payload"],
+                            headers=test_headers
+                        )
+                    
+                    # Check HTTP status code
+                    status_passed = response.status_code == test["expected_code"]
+                    
+                    # Try to parse JSON response and check error code
+                    json_rpc_passed = True
+                    try:
+                        response_json = response.json()
+                        if "error" in response_json:
+                            actual_error_code = response_json["error"].get("code")
+                            json_rpc_passed = actual_error_code == test["expected_json_rpc_error"]
+                    except:
+                        # If we can't parse JSON, just check HTTP status
+                        pass
+                    
+                    test_passed = status_passed and json_rpc_passed
+                    test_results.append({
+                        "name": test["name"],
+                        "passed": test_passed,
+                        "expected_code": test["expected_code"],
+                        "actual_code": response.status_code,
+                        "expected_json_rpc": test["expected_json_rpc_error"],
+                        "response": response_json if 'response_json' in locals() else None
+                    })
+                    
+                    if not test_passed:
+                        all_passed = False
+                        logger.warning(f"Error test {test['name']} failed: expected HTTP {test['expected_code']}, got {response.status_code}")
+                        
+                except Exception as e:
+                    logger.error(f"Error test {test['name']} raised exception: {e}")
+                    all_passed = False
+                    test_results.append({
+                        "name": test["name"],
+                        "passed": False,
+                        "error": str(e)
+                    })
             
             self.results["error_handling"] = {
-                "status": "success",
-                "tests_passed": 3
+                "status": "success" if all_passed else "failed",
+                "tests": test_results,
+                "total_tests": len(tests),
+                "passed_tests": sum(1 for t in test_results if t.get("passed", False))
             }
             
-            return True
-        
+            return all_passed
+            
         except Exception as e:
+            logger.error(f"Exception during error handling test: {e}")
             self.results["error_handling"] = {
-                "status": "error",
+                "status": "error", 
                 "error": str(e)
             }
-            logger.exception("Exception during error handling test")
             return False
     
     def test_batch_requests(self) -> bool:
@@ -635,9 +678,9 @@ class McpHttpComplianceTest:
                 headers=headers
             )
             
-            # Should return 404 Not Found for invalid session
-            if invalid_session_response.status_code != 404:
-                logger.warning(f"Invalid session expected 404 status, got {invalid_session_response.status_code}")
+            # Should return 401 Unauthorized for invalid session (following JSON-RPC over HTTP standards)
+            if invalid_session_response.status_code != 401:
+                logger.warning(f"Invalid session expected 401 status, got {invalid_session_response.status_code}")
             
             self.results["session_management"] = {
                 "status": "success",
@@ -851,93 +894,73 @@ class McpHttpComplianceTest:
         print(f"\nSummary: {success_count}/{total_count} tests passed ({skipped_count} skipped)")
 
     def generate_report(self, output_dir: str = "reports") -> str:
-        """Generate a detailed markdown report of the test results."""
-        # Ensure output directory exists
+        """Generate a detailed compliance test report."""
         os.makedirs(output_dir, exist_ok=True)
         
-        # Generate timestamp for the report filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.fromtimestamp(self.test_start_time).strftime("%Y%m%d_%H%M%S")
         report_file = os.path.join(output_dir, f"http_compliance_test_{timestamp}.md")
         
-        # Calculate test duration
-        duration = time.time() - self.test_start_time if self.test_start_time else 0
-        
-        # Count successful tests
-        success_count = sum(1 for result in self.results.values() if result.get("status") == "success")
-        total_count = len(self.results)
-        skipped_count = sum(1 for result in self.results.values() if result.get("status") == "skipped")
-        
-        # Generate markdown content
-        lines = [
-            "# MCP HTTP Server Compliance Report",
-            "",
-            "## Test Information",
-            "",
-            f"- **Server URL**: `{self.server_url}`",
-            f"- **Protocol Version**: {self.protocol_version}",
-            f"- **Test Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            f"- **Test Duration**: {duration:.2f} seconds",
-            "",
-            "## Test Results Summary",
-            "",
-            f"- **Total Tests**: {total_count}",
-            f"- **Passed**: {success_count}",
-            f"- **Failed**: {total_count - success_count - skipped_count}",
-            f"- **Skipped**: {skipped_count}",
-            f"- **Success Rate**: {(success_count / (total_count - skipped_count) * 100):.1f}%",
-            "",
-            "## Detailed Results",
-            ""
-        ]
-        
-        # Add detailed results for each test
-        for test_name, result in self.results.items():
-            status = result.get("status", "unknown")
-            status_icon = "✅" if status == "success" else "❌" if status == "failed" else "⚠️"
-            
-            lines.extend([
-                f"### {test_name.replace('_', ' ').title()}",
-                "",
-                f"**Status**: {status_icon} {status.title()}"
-            ])
-            
-            # Add test-specific details
-            if status == "success":
-                if test_name == "initialization":
-                    lines.extend([
-                        "",
-                        "**Details**:",
-                        f"- Protocol Version: {result.get('protocol_version')}",
-                        f"- Server Info: {result.get('server_info')}",
-                        f"- Session ID: {result.get('session_id')}"
-                    ])
-                elif test_name == "tools_functionality":
-                    lines.extend([
-                        "",
-                        "**Details**:",
-                        f"- Available Tools: {', '.join(result.get('available_tools', []))}"
-                    ])
-                elif test_name == "ping":
-                    lines.extend([
-                        "",
-                        "**Details**:",
-                        f"- Response Time: {result.get('elapsed_seconds', 0):.3f} seconds"
-                    ])
-            elif status in ["failed", "error"]:
-                lines.extend([
-                    "",
-                    "**Error Details**:",
-                    f"```",
-                    f"{result.get('error', 'No error details available')}",
-                    f"```"
-                ])
-            
-            lines.append("")  # Add blank line between sections
-        
-        # Write the report
         with open(report_file, "w") as f:
-            f.write("\n".join(lines))
+            f.write("# MCP HTTP Compliance Test Report\n\n")
+            f.write(f"**Server**: {self.server_url}\n")
+            f.write(f"**Timestamp**: {datetime.fromtimestamp(self.test_start_time).isoformat()}\n")
+            f.write(f"**Protocol Version**: {self.protocol_version}\n\n")
+            
+            for test_name, result in self.results.items():
+                f.write(f"## {test_name.replace('_', ' ').title()}\n\n")
+                
+                status = result.get("status", "unknown")
+                if isinstance(status, bool):
+                    status = "success" if status else "failed"
+                
+                status_icon = "✅" if status == "success" else "❌" if status == "failed" else "⚠️"
+                f.write(f"**Status**: {status_icon} {status.title()}\n\n")
+                
+                if "error" in result:
+                    f.write(f"**Error**: {result['error']}\n\n")
+                elif "reason" in result:
+                    f.write(f"**Reason**: {result['reason']}\n\n")
+                else:
+                    # Add specific details for each test type
+                    if test_name == "initialization":
+                        if "session_id" in result:
+                            f.write(f"**Session ID**: {result['session_id']}\n")
+                        if "protocol_version" in result:
+                            f.write(f"**Protocol Version**: {result['protocol_version']}\n")
+                        if "server_info" in result:
+                            f.write(f"**Server Info**: {result['server_info']}\n")
+                    elif test_name == "tools_functionality":
+                        if "tools" in result:
+                            f.write(f"**Available Tools**: {', '.join(result['tools'])}\n")
+                    elif test_name == "error_handling":
+                        if "tests" in result:
+                            f.write(f"**Tests Passed**: {result.get('passed_tests', 0)}/{result.get('total_tests', 0)}\n\n")
+                            for test in result["tests"]:
+                                test_status = "✅" if test.get("passed", False) else "❌"
+                                f.write(f"- {test_status} **{test['name']}**: ")
+                                if test.get("passed", False):
+                                    f.write(f"HTTP {test.get('actual_code', 'N/A')}\n")
+                                else:
+                                    f.write(f"Expected HTTP {test.get('expected_code', 'N/A')}, got {test.get('actual_code', 'N/A')}\n")
+                    elif test_name == "ping":
+                        if "response_time" in result:
+                            f.write(f"**Response Time**: {result['response_time']:.3f} seconds\n")
+                
+                f.write("\n")
+            
+            # Summary
+            total_tests = len([r for r in self.results.values() if r.get("status") not in ["skipped", "unknown"]])
+            passed_tests = len([r for r in self.results.values() if r.get("status") == "success"])
+            skipped_tests = len([r for r in self.results.values() if r.get("status") == "skipped"])
+            
+            f.write(f"## Summary\n\n")
+            f.write(f"**Total Tests**: {total_tests}\n")
+            f.write(f"**Passed**: {passed_tests}\n")
+            f.write(f"**Failed**: {total_tests - passed_tests}\n")
+            f.write(f"**Skipped**: {skipped_tests}\n")
+            f.write(f"**Success Rate**: {(passed_tests/total_tests*100) if total_tests > 0 else 0:.1f}%\n")
         
+        logger.info(f"Compliance report generated: {report_file}")
         return report_file
 
 def main():
