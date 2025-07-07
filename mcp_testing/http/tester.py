@@ -864,12 +864,12 @@ class MCPHttpTester:
     
     def test_www_authenticate_flexibility(self):
         """
-        Test the flexibility of WWW-Authenticate header (MUST -> SHOULD change).
+        Test the WWW-Authenticate header requirement for 2025-06-18.
         
         Returns:
             bool: True if server handles WWW-Authenticate appropriately
         """
-        print("Testing WWW-Authenticate header flexibility...")
+        print("Testing WWW-Authenticate header compliance...")
         
         try:
             # Send request without authentication
@@ -889,17 +889,29 @@ class MCPHttpTester:
                 www_authenticate = response.headers.get("WWW-Authenticate") or response.headers.get("www-authenticate")
                 
                 if www_authenticate:
-                    print("✅ Server provides WWW-Authenticate header (recommended)")
+                    print("✅ Server provides WWW-Authenticate header")
                     
-                    # Validate header format
-                    if "Bearer" in www_authenticate:
-                        print("✅ WWW-Authenticate header properly formatted")
+                    # For 2025-06-18, WWW-Authenticate header is MUST when returning 401
+                    if self.protocol_version == "2025-06-18":
+                        # Validate header format according to OAuth 2.1 spec
+                        if "Bearer" in www_authenticate:
+                            print("✅ WWW-Authenticate header properly formatted for OAuth 2.1")
+                        else:
+                            print("❌ WWW-Authenticate header doesn't specify Bearer scheme (required for 2025-06-18)")
+                            return False
                     else:
-                        print("⚠️  WWW-Authenticate header doesn't specify Bearer scheme")
+                        # For older versions, just check if it's properly formatted
+                        if "Bearer" in www_authenticate:
+                            print("✅ WWW-Authenticate header properly formatted")
+                        else:
+                            print("⚠️  WWW-Authenticate header doesn't specify Bearer scheme")
                     
                 else:
-                    print("ℹ️  Server doesn't provide WWW-Authenticate header (acceptable)")
-                    print("    This aligns with the MUST -> SHOULD specification change")
+                    if self.protocol_version == "2025-06-18":
+                        print("❌ Server doesn't provide WWW-Authenticate header (MUST for 2025-06-18)")
+                        return False
+                    else:
+                        print("ℹ️  Server doesn't provide WWW-Authenticate header (acceptable for older versions)")
                 
                 return True
                 
@@ -911,7 +923,7 @@ class MCPHttpTester:
                 return True
                 
         except Exception as e:
-            print(f"❌ WWW-Authenticate flexibility test failed: {str(e)}")
+            print(f"❌ WWW-Authenticate header test failed: {str(e)}")
             return False
 
     def test_status_codes(self):
