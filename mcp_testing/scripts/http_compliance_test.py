@@ -16,6 +16,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 import uuid
 import os
+import base64
+import hashlib
+import secrets
+import urllib.parse
+from urllib.parse import urlparse, urljoin
 
 import httpx
 
@@ -29,15 +34,22 @@ logger = logging.getLogger("mcp-http-compliance-test")
 class McpHttpComplianceTest:
     """Tests MCP HTTP servers against the specification."""
     
-    def __init__(self, server_url: str, debug: bool = False):
+    def __init__(self, server_url: str, debug: bool = False, test_oauth: bool = False):
         """Initialize the tester."""
         self.server_url = server_url.rstrip("/")
         self.debug = debug
+        self.test_oauth = test_oauth
         self.client = httpx.Client(follow_redirects=True)
         self.session_id = None
         self.results = {}
         self.protocol_version = "2025-06-18"  # Default protocol version
         self.test_start_time = None
+        
+        # OAuth 2.1 support
+        parsed_url = urlparse(server_url)
+        self.base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        self.oauth_server_metadata = None
+        self.bearer_token = None
         
         if debug:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -54,27 +66,32 @@ class McpHttpComplianceTest:
             # Initialization failed, can't continue
             return success
         
-        # Test 2: Basic tools functionality
+        # Test 2: OAuth 2.1 authentication (if enabled)
+        if self.test_oauth:
+            if not self.test_oauth_authentication():
+                success = False
+        
+        # Test 3: Basic tools functionality
         if not self.test_tools_functionality():
             success = False
         
-        # Test 3: Error handling
+        # Test 4: Error handling
         if not self.test_error_handling():
             success = False
         
-        # Test 4: Batch requests
+        # Test 5: Batch requests
         if not self.test_batch_requests():
             success = False
         
-        # Test 5: Session management
+        # Test 6: Session management
         if not self.test_session_management():
             success = False
         
-        # Test 6: Protocol negotiation
+        # Test 7: Protocol negotiation
         if not self.test_protocol_negotiation():
             success = False
             
-        # Test 7: Ping utility
+        # Test 8: Ping utility
         if not self.test_ping():
             success = False
         
@@ -230,6 +247,218 @@ class McpHttpComplianceTest:
                 "error": str(e)
             }
             logger.exception("Exception during initialization test")
+            return False
+    
+    def fetch_oauth_server_metadata(self):
+        """Fetch OAuth server metadata from .well-known/oauth-authorization-server."""
+        try:
+            well_known_url = urljoin(self.base_url, "/.well-known/oauth-authorization-server")
+            logger.debug(f"Fetching OAuth server metadata from: {well_known_url}")
+            
+            response = self.client.get(well_known_url)
+            if response.status_code == 200:
+                metadata = response.json()
+                self.oauth_server_metadata = metadata
+                logger.debug(f"OAuth server metadata retrieved: {metadata}")
+                return metadata
+            else:
+                logger.debug(f"OAuth server metadata not available, status: {response.status_code}")
+                return None
+        except Exception as e:
+            logger.debug(f"Failed to fetch OAuth server metadata: {str(e)}")
+            return None
+    
+    def generate_pkce_challenge(self):
+        """Generate PKCE code verifier and challenge."""
+        # Generate code verifier (43-128 characters)
+        code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+        
+        # Generate code challenge (SHA256 hash of verifier)
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode('utf-8')).digest()
+        ).decode('utf-8').rstrip('=')
+        
+        return code_verifier, code_challenge
+    
+    def handle_401_response(self, response):
+        """Handle 401 Unauthorized responses according to OAuth 2.1 spec."""
+        oauth_info = {
+            "requires_auth": True,
+            "www_authenticate": None,
+            "oauth_metadata": None,
+            "next_steps": []
+        }
+        
+        # Parse WWW-Authenticate header
+        www_authenticate = response.headers.get("WWW-Authenticate") or response.headers.get("www-authenticate")
+        if www_authenticate:
+            oauth_info["www_authenticate"] = www_authenticate
+            logger.debug(f"Found WWW-Authenticate header: {www_authenticate}")
+            
+            # Parse Bearer challenge
+            if "Bearer" in www_authenticate:
+                oauth_info["scheme"] = "Bearer"
+                challenge_params = {}
+                parts = www_authenticate.replace("Bearer", "").strip().split(",")
+                for part in parts:
+                    if "=" in part:
+                        key, value = part.strip().split("=", 1)
+                        challenge_params[key.strip()] = value.strip().strip('"')
+                oauth_info["challenge_params"] = challenge_params
+                oauth_info["next_steps"].append("Parse Bearer challenge parameters")
+        
+        # Try to fetch OAuth server metadata
+        if not self.oauth_server_metadata:
+            metadata = self.fetch_oauth_server_metadata()
+            if metadata:
+                oauth_info["oauth_metadata"] = metadata
+                oauth_info["next_steps"].append("Fetch OAuth server metadata")
+        
+        return oauth_info
+    
+    def test_oauth_authentication(self) -> bool:
+        """Test OAuth 2.1 authentication compliance."""
+        logger.info("Testing OAuth 2.1 authentication")
+        
+        test_results = {
+            "basic_flow": False,
+            "www_authenticate_header": False,
+            "oauth_metadata_available": False,
+            "authorization_code_flow": False,
+            "pkce_support": False,
+            "error_handling": False,
+            "details": []
+        }
+        
+        try:
+            # Send request without authentication to trigger 401
+            test_payload = {
+                "jsonrpc": "2.0",
+                "method": "ping",
+                "id": str(uuid.uuid4())
+            }
+            
+            response = self.client.post(
+                f"{self.server_url}/mcp",
+                json=test_payload,
+                headers={"Content-Type": "application/json"}
+            )
+            
+            if response.status_code == 401:
+                test_results["basic_flow"] = True
+                test_results["details"].append("Server properly returns 401 for unauthenticated requests")
+                logger.debug("✅ Server properly returns 401 for unauthenticated requests")
+                
+                # Handle the 401 response
+                oauth_info = self.handle_401_response(response)
+                
+                # Check WWW-Authenticate header
+                if oauth_info["www_authenticate"]:
+                    test_results["www_authenticate_header"] = True
+                    test_results["details"].append("Server provides WWW-Authenticate header")
+                    logger.debug("✅ Server provides WWW-Authenticate header")
+                    
+                    # Check for Bearer scheme
+                    if oauth_info.get("scheme") == "Bearer":
+                        test_results["details"].append("Server uses Bearer authentication scheme")
+                        logger.debug("✅ Server uses Bearer authentication scheme")
+                    else:
+                        test_results["details"].append("Server doesn't use Bearer authentication scheme")
+                        logger.debug("⚠️  Server doesn't use Bearer authentication scheme")
+                else:
+                    test_results["details"].append("Server doesn't provide WWW-Authenticate header (acceptable per spec)")
+                    logger.debug("ℹ️  Server doesn't provide WWW-Authenticate header (acceptable per spec)")
+                
+                # Check for OAuth server metadata
+                if oauth_info["oauth_metadata"]:
+                    test_results["oauth_metadata_available"] = True
+                    test_results["details"].append("OAuth server metadata available")
+                    logger.debug("✅ OAuth server metadata available")
+                    
+                    metadata = oauth_info["oauth_metadata"]
+                    required_fields = ["authorization_endpoint", "token_endpoint", "issuer"]
+                    
+                    all_fields_present = True
+                    for field in required_fields:
+                        if field in metadata:
+                            test_results["details"].append(f"OAuth metadata contains {field}")
+                            logger.debug(f"✅ OAuth metadata contains {field}")
+                        else:
+                            test_results["details"].append(f"OAuth metadata missing {field}")
+                            logger.debug(f"❌ OAuth metadata missing {field}")
+                            all_fields_present = False
+                    
+                    if all_fields_present:
+                        test_results["authorization_code_flow"] = True
+                        test_results["details"].append("Authorization code flow supported")
+                        logger.debug("✅ Authorization code flow supported")
+                    
+                    # Check PKCE support
+                    pkce_methods = metadata.get("code_challenge_methods_supported", [])
+                    if "S256" in pkce_methods:
+                        test_results["pkce_support"] = True
+                        test_results["details"].append("PKCE S256 method supported")
+                        logger.debug("✅ PKCE S256 method supported")
+                    else:
+                        test_results["details"].append("PKCE S256 method not explicitly supported")
+                        logger.debug("⚠️  PKCE S256 method not explicitly supported")
+                    
+                    # Test error handling by making invalid token request
+                    if "token_endpoint" in metadata:
+                        try:
+                            invalid_token_response = self.client.post(
+                                metadata["token_endpoint"],
+                                data={
+                                    "grant_type": "authorization_code",
+                                    "code": "invalid_code",
+                                    "client_id": "test_client"
+                                }
+                            )
+                            
+                            if invalid_token_response.status_code in [400, 401]:
+                                test_results["error_handling"] = True
+                                test_results["details"].append("OAuth error handling works properly")
+                                logger.debug("✅ OAuth error handling works properly")
+                            else:
+                                test_results["details"].append(f"Unexpected error response: {invalid_token_response.status_code}")
+                                logger.debug(f"⚠️  Unexpected error response: {invalid_token_response.status_code}")
+                        except Exception as e:
+                            test_results["details"].append(f"Error testing OAuth error handling: {str(e)}")
+                            logger.debug(f"ℹ️  Error testing OAuth error handling: {str(e)}")
+                
+                else:
+                    test_results["details"].append("OAuth server metadata not available")
+                    logger.debug("⚠️  OAuth server metadata not available")
+                
+            elif response.status_code == 200:
+                test_results["basic_flow"] = True
+                test_results["details"].append("Server doesn't require authentication")
+                logger.debug("ℹ️  Server doesn't require authentication")
+                
+            else:
+                test_results["details"].append(f"Unexpected status code: {response.status_code}")
+                logger.debug(f"❌ Unexpected status code: {response.status_code}")
+            
+            # Calculate overall success
+            oauth_success = (
+                test_results["basic_flow"] and
+                (test_results["oauth_metadata_available"] or response.status_code == 200)
+            )
+            
+            self.results["oauth_authentication"] = {
+                "status": "success" if oauth_success else "failed",
+                "details": test_results["details"],
+                "tests": test_results
+            }
+            
+            return oauth_success
+            
+        except Exception as e:
+            logger.exception("Exception during OAuth authentication test")
+            self.results["oauth_authentication"] = {
+                "status": "error",
+                "error": str(e)
+            }
             return False
     
     def test_tools_functionality(self) -> bool:
@@ -842,6 +1071,21 @@ class McpHttpComplianceTest:
                     print(f"  Available Tools: {', '.join(result.get('available_tools', []))}")
                 elif test_name == "ping":
                     print(f"  Response Time: {result.get('elapsed_seconds', 0):.3f} seconds")
+                elif test_name == "oauth_authentication":
+                    tests = result.get('tests', {})
+                    print(f"  OAuth Server Metadata: {'✅' if tests.get('oauth_metadata_available') else '❌'}")
+                    print(f"  WWW-Authenticate Header: {'✅' if tests.get('www_authenticate_header') else '❌'}")
+                    print(f"  Authorization Code Flow: {'✅' if tests.get('authorization_code_flow') else '❌'}")
+                    print(f"  PKCE Support: {'✅' if tests.get('pkce_support') else '❌'}")
+                    print(f"  Error Handling: {'✅' if tests.get('error_handling') else '❌'}")
+                    
+                    # Print details if available
+                    if result.get('details'):
+                        print("  Details:")
+                        for detail in result.get('details', [])[:3]:  # Show first 3 details
+                            print(f"    • {detail}")
+                        if len(result.get('details', [])) > 3:
+                            print(f"    ... and {len(result.get('details', [])) - 3} more")
         
         # Summary
         success_count = sum(1 for result in self.results.values() if result.get("status") == "success")
@@ -946,10 +1190,11 @@ def main():
     parser.add_argument("--server-url", default="http://localhost:8088", help="URL of the MCP server")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--output-dir", default="reports", help="Directory to store the report files")
+    parser.add_argument("--oauth", action="store_true", help="Enable OAuth 2.1 authentication testing")
     args = parser.parse_args()
     
     # Create and run the tester
-    tester = McpHttpComplianceTest(args.server_url, args.debug)
+    tester = McpHttpComplianceTest(args.server_url, args.debug, args.oauth)
     
     # Run the tests
     success = tester.run_tests()

@@ -16,7 +16,7 @@ import sys
 from .tester import MCPHttpTester
 from .utils import wait_for_server
 
-def run_http_tester(url, debug=False, protocol_version="2025-03-26"):
+def run_http_tester(url, debug=False, protocol_version="2025-03-26", oauth=False):
     """
     Run the HTTP tester against a server.
     
@@ -24,6 +24,7 @@ def run_http_tester(url, debug=False, protocol_version="2025-03-26"):
         url: The server URL to test
         debug: Whether to enable debug output
         protocol_version: The protocol version to test
+        oauth: Whether to enable OAuth 2.1 authentication testing
         
     Returns:
         True if all tests passed, False otherwise
@@ -37,7 +38,11 @@ def run_http_tester(url, debug=False, protocol_version="2025-03-26"):
     tester = MCPHttpTester(url, debug)
     tester.protocol_version = protocol_version
     
-    return tester.run_all_tests()
+    # Always run comprehensive tests (includes OAuth if enabled)
+    if oauth:
+        return tester.run_comprehensive_tests()
+    else:
+        return tester.run_all_tests()
 
 def main():
     """Main entry point for the CLI."""
@@ -72,6 +77,11 @@ def main():
         default=2,
         help="Seconds to wait between connection retries"
     )
+    parser.add_argument(
+        "--oauth", 
+        action="store_true",
+        help="Enable OAuth 2.1 authentication testing"
+    )
     
     args = parser.parse_args()
     
@@ -87,7 +97,8 @@ def main():
     success = run_http_tester(
         args.server_url, 
         args.debug,
-        args.protocol_version
+        args.protocol_version,
+        args.oauth
     )
     
     if success:
