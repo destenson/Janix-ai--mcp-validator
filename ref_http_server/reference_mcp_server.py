@@ -33,7 +33,7 @@ logger = logging.getLogger("mcp-reference-server")
 
 # OAuth 2.1 / Authentication Configuration
 # In a real implementation, these would be loaded from environment variables or config
-OAUTH_ENABLED = False  # Set to True to enable OAuth 2.1 authentication
+OAUTH_ENABLED = True  # Set to True to enable OAuth 2.1 authentication
 OAUTH_REALM = "mcp-server"
 OAUTH_SCOPE = "mcp:read mcp:write"
 VALID_TOKENS = {
@@ -857,6 +857,60 @@ async def server_info():
         }
     
     return info
+
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_authorization_server_metadata():
+    """
+    OAuth 2.0 Authorization Server Metadata as required by 2025-06-18 spec.
+    
+    Returns:
+        OAuth server metadata for discovery
+    """
+    if not OAUTH_ENABLED:
+        raise HTTPException(status_code=404, detail="OAuth not enabled")
+    
+    base_url = "http://localhost:8080"  # In production, use actual server URL
+    return {
+        "issuer": base_url,
+        "authorization_endpoint": f"{base_url}/oauth/authorize",
+        "token_endpoint": f"{base_url}/oauth/token",
+        "jwks_uri": f"{base_url}/oauth/jwks",
+        "registration_endpoint": f"{base_url}/oauth/register",
+        "scopes_supported": ["mcp:read", "mcp:write", "mcp:admin"],
+        "response_types_supported": ["code"],
+        "response_modes_supported": ["query", "fragment"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "code_challenge_methods_supported": ["S256"],
+        "resource_indicators_supported": True,
+        "authorization_details_supported": True,
+        "token_endpoint_auth_signing_alg_values_supported": ["RS256", "ES256"],
+        "introspection_endpoint": f"{base_url}/oauth/introspect",
+        "revocation_endpoint": f"{base_url}/oauth/revoke"
+    }
+
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource_metadata():
+    """
+    OAuth 2.0 Protected Resource Metadata as required by 2025-06-18 spec.
+    
+    Returns:
+        Protected resource metadata
+    """
+    if not OAUTH_ENABLED:
+        raise HTTPException(status_code=404, detail="OAuth not enabled")
+    
+    base_url = "http://localhost:8080"  # In production, use actual server URL
+    return {
+        "resource": base_url,
+        "authorization_servers": [base_url],
+        "jwks_uri": f"{base_url}/oauth/jwks",
+        "scopes_supported": ["mcp:read", "mcp:write", "mcp:admin"],
+        "bearer_methods_supported": ["header"],
+        "resource_documentation": "https://modelcontextprotocol.io/docs",
+        "resource_policy_uri": f"{base_url}/privacy-policy",
+        "resource_tos_uri": f"{base_url}/terms-of-service"
+    }
 
 def main():
     """Run the server."""
