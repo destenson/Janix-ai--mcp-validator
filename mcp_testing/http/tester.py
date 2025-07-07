@@ -1950,6 +1950,16 @@ class MCPHttpTester:
             
             if not self.test_available_tools():
                 return False
+                
+            # Run new tests
+            if not self.test_status_codes():
+                return False
+                
+            if not self.test_headers():
+                return False
+                
+            if not self.test_protocol_versions():
+                return False
             
             print("\n=== Test Results ===")
             print("PASS: OPTIONS request")
@@ -1958,6 +1968,9 @@ class MCPHttpTester:
             if self.protocol_version == "2025-03-26" and self.get_tool_by_name("sleep"):
                 print("PASS: Async Sleep Tool")
             print("PASS: Available Tools")
+            print("PASS: Status Codes")
+            print("PASS: Headers")
+            print("PASS: Protocol Versions")
             
             print("\nSummary: All basic tests passed")
             return True
