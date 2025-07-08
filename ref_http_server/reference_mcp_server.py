@@ -36,6 +36,11 @@ logger = logging.getLogger("mcp-reference-server")
 OAUTH_ENABLED = True  # Set to True to enable OAuth 2.1 authentication
 OAUTH_REALM = "mcp-server"
 OAUTH_SCOPE = "mcp:read mcp:write"
+OAUTH_ISSUER = "https://auth.mcp-server.example.com"
+OAUTH_AUTHORIZATION_ENDPOINT = f"{OAUTH_ISSUER}/authorize"
+OAUTH_TOKEN_ENDPOINT = f"{OAUTH_ISSUER}/token"
+OAUTH_JWKS_URI = f"{OAUTH_ISSUER}/jwks"
+
 VALID_TOKENS = {
     # Example tokens - in production, validate against OAuth server
     "valid-test-token-123": {
@@ -167,14 +172,25 @@ def create_www_authenticate_header(error: str = "invalid_token",
     Returns:
         WWW-Authenticate header value
     """
-    return f'Bearer realm="{OAUTH_REALM}", scope="{OAUTH_SCOPE}", error="{error}", error_description="{error_description}"'
+    # Required fields for 2025-06-18: realm, scope
+    # Optional fields: error, error_description
+    header = f'Bearer realm="{OAUTH_REALM}", scope="{OAUTH_SCOPE}"'
+    
+    if error:
+        header += f', error="{error}"'
+    if error_description:
+        header += f', error_description="{error_description}"'
+    
+    return header
 
-def check_authentication(authorization: Optional[str] = Header(None),
+async def check_authentication(request: Request,
+                        authorization: Optional[str] = Header(None),
                         mcp_protocol_version: Optional[str] = Header(None, alias="MCP-Protocol-Version")) -> Dict[str, Any]:
     """
     Check authentication for requests.
     
     Args:
+        request: FastAPI request object
         authorization: Authorization header
         mcp_protocol_version: MCP protocol version header (required for 2025-06-18)
         
@@ -184,6 +200,19 @@ def check_authentication(authorization: Optional[str] = Header(None),
     Raises:
         HTTPException: If authentication fails
     """
+    # Try to parse the request body once and store it in state
+    try:
+        body = await request.json()
+        request.state.body = body
+    except (json.JSONDecodeError, RuntimeError):
+        request.state.body = None
+        body = None
+
+    # Allow initialize method without authentication
+    if isinstance(body, dict) and body.get("method") == "initialize":
+        logger.debug("Allowing initialize method without authentication")
+        return {"valid": True, "scope": ["mcp:read", "mcp:write"]}
+    
     # Validate MCP-Protocol-Version header for 2025-06-18
     if mcp_protocol_version == "2025-06-18":
         logger.debug(f"2025-06-18 protocol detected, MCP-Protocol-Version header: {mcp_protocol_version}")
@@ -198,10 +227,26 @@ def check_authentication(authorization: Optional[str] = Header(None),
                 detail="Authentication required",
                 headers={"WWW-Authenticate": www_authenticate}
             )
+        
+        # Check token scope
+        required_scopes = OAUTH_SCOPE.split()
+        token_scopes = token_info.get("scope", [])
+        missing_scopes = [scope for scope in required_scopes if scope not in token_scopes]
+        
+        if missing_scopes:
+            www_authenticate = create_www_authenticate_header(
+                error="insufficient_scope",
+                error_description=f"The token is missing required scopes: {' '.join(missing_scopes)}"
+            )
+            raise HTTPException(
+                status_code=401,
+                detail="Insufficient scope",
+                headers={"WWW-Authenticate": www_authenticate}
+            )
+        
         return token_info
     
-    # Authentication not required
-    return {"valid": True}
+    return {"valid": True, "scope": ["mcp:read", "mcp:write"]}
 
 # Reference MCP Server Implementation
 class McpReferenceServer:
@@ -675,60 +720,22 @@ mcp_server = McpReferenceServer(
 @app.post("/mcp")
 async def handle_post_message(request: Request, 
                             auth_info: Dict[str, Any] = Depends(check_authentication)):
-    """Handle POST requests to /mcp endpoint with OAuth 2.1 authentication."""
+    """Handle POST requests with OAuth 2.1 authentication."""
     try:
-        # Extract session ID from query parameters or headers
-        session_id = request.query_params.get("session_id")
-        if not session_id:
-            session_id = request.headers.get("Mcp-Session-Id")
+        # Extract session ID from headers or query params
+        session_id = request.headers.get("Mcp-Session-Id") or request.query_params.get("session_id")
         
-        # Get request body as text first to handle JSON parsing ourselves
-        body_text = await request.body()
-        
-        # Try to parse JSON
-        try:
-            body = json.loads(body_text.decode())
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            # Parse error - return 400 with JSON-RPC error
+        # Get the body from the request state (parsed in check_authentication)
+        body = getattr(request.state, "body", None)
+        if body is None:
+             # This can happen for GET requests or if body parsing failed
             return JSONResponse(
                 status_code=400,
-                content={
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32700,  # Parse error
-                        "message": "Parse error: Invalid JSON"
-                    },
-                    "id": None
-                }
+                content={"error": "Invalid or missing request body"}
             )
         
-        # Check for batch requests (arrays) and reject them for 2025-06-18
+        # Handle batch requests
         if isinstance(body, list):
-            # Get protocol version from headers or determine from session
-            protocol_version = request.headers.get("MCP-Protocol-Version")
-            if not protocol_version and session_id:
-                try:
-                    session_info = mcp_server.get_session(session_id)
-                    protocol_version = session_info.get("protocol_version")
-                except:
-                    protocol_version = None
-            
-            # For 2025-06-18, batch requests are not supported
-            if protocol_version == "2025-06-18":
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32600,  # Invalid Request
-                            "message": "Batch requests are not supported in protocol version 2025-06-18"
-                        },
-                        "id": None
-                    }
-                )
-            
-            # For older protocols, batch requests would be handled here
-            # But for simplicity, we'll reject all batch requests for now
             return JSONResponse(
                 status_code=400,
                 content={
@@ -736,32 +743,27 @@ async def handle_post_message(request: Request,
                     "error": {
                         "code": -32600,  # Invalid Request
                         "message": "Batch requests are not supported by this server"
-                    },
-                    "id": None
+                    }
                 }
             )
         
-        # Handle the message
+        # Handle single request
         response = await mcp_server.handle_message(body, session_id)
-        
-        # Add session ID to response headers if available
-        if hasattr(response, 'headers') and session_id:
-            response.headers["Mcp-Session-Id"] = session_id
-        
         return response
         
+    except HTTPException as e:
+        # Re-raise HTTP exceptions
+        raise e
     except Exception as e:
-        logger.error(f"Error handling POST message: {str(e)}")
+        logger.exception("Internal server error")
         return JSONResponse(
             status_code=500,
             content={
                 "jsonrpc": "2.0",
                 "error": {
-                    "code": -32603,  # Internal error
-                    "message": "Internal error",
-                    "data": str(e)
-                },
-                "id": None
+                    "code": -32603,
+                    "message": f"Internal server error: {str(e)}"
+                }
             }
         )
 
@@ -862,58 +864,53 @@ async def server_info():
     
     return info
 
+# OAuth 2.1 Metadata Endpoints
 @app.get("/.well-known/oauth-authorization-server")
 async def oauth_authorization_server_metadata():
     """
-    OAuth 2.0 Authorization Server Metadata as required by 2025-06-18 spec.
-    
-    Returns:
-        OAuth server metadata for discovery
+    OAuth 2.1 Authorization Server Metadata endpoint.
+    Required by 2025-06-18 specification.
     """
-    if not OAUTH_ENABLED:
-        raise HTTPException(status_code=404, detail="OAuth not enabled")
-    
-    base_url = "http://localhost:8080"  # In production, use actual server URL
     return {
-        "issuer": base_url,
-        "authorization_endpoint": f"{base_url}/oauth/authorize",
-        "token_endpoint": f"{base_url}/oauth/token",
-        "jwks_uri": f"{base_url}/oauth/jwks",
-        "registration_endpoint": f"{base_url}/oauth/register",
-        "scopes_supported": ["mcp:read", "mcp:write", "mcp:admin"],
+        "issuer": OAUTH_ISSUER,
+        "authorization_endpoint": OAUTH_AUTHORIZATION_ENDPOINT,
+        "token_endpoint": OAUTH_TOKEN_ENDPOINT,
+        "jwks_uri": OAUTH_JWKS_URI,
         "response_types_supported": ["code"],
-        "response_modes_supported": ["query", "fragment"],
+        "response_modes_supported": ["query"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
-        "code_challenge_methods_supported": ["S256"],
-        "resource_indicators_supported": True,
-        "authorization_details_supported": True,
-        "token_endpoint_auth_signing_alg_values_supported": ["RS256", "ES256"],
-        "introspection_endpoint": f"{base_url}/oauth/introspect",
-        "revocation_endpoint": f"{base_url}/oauth/revoke"
+        "token_endpoint_auth_signing_alg_values_supported": ["RS256"],
+        "scopes_supported": OAUTH_SCOPE.split(),
+        "code_challenge_methods_supported": ["S256"],  # PKCE S256 required for 2025-06-18
+        "authorization_response_iss_parameter_supported": True,
+        "service_documentation": "https://modelcontextprotocol.io/docs/oauth",
+        "op_policy_uri": "https://modelcontextprotocol.io/docs/oauth/policy",
+        "op_tos_uri": "https://modelcontextprotocol.io/docs/oauth/terms",
+        "revocation_endpoint": f"{OAUTH_ISSUER}/revoke",
+        "revocation_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "introspection_endpoint": f"{OAUTH_ISSUER}/introspect",
+        "introspection_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "dpop_signing_alg_values_supported": ["ES256", "RS256"]
     }
 
 @app.get("/.well-known/oauth-protected-resource")
 async def oauth_protected_resource_metadata():
     """
-    OAuth 2.0 Protected Resource Metadata as required by 2025-06-18 spec.
-    
-    Returns:
-        Protected resource metadata
+    OAuth 2.1 Protected Resource Metadata endpoint.
+    Required by 2025-06-18 specification.
     """
-    if not OAUTH_ENABLED:
-        raise HTTPException(status_code=404, detail="OAuth not enabled")
-    
-    base_url = "http://localhost:8080"  # In production, use actual server URL
     return {
-        "resource": base_url,
-        "authorization_servers": [base_url],
-        "jwks_uri": f"{base_url}/oauth/jwks",
-        "scopes_supported": ["mcp:read", "mcp:write", "mcp:admin"],
-        "bearer_methods_supported": ["header"],
-        "resource_documentation": "https://modelcontextprotocol.io/docs",
-        "resource_policy_uri": f"{base_url}/privacy-policy",
-        "resource_tos_uri": f"{base_url}/terms-of-service"
+        "resource": OAUTH_ISSUER,
+        "authorization_servers": [OAUTH_ISSUER],
+        "scopes_supported": OAUTH_SCOPE.split(),
+        "validation_methods_supported": ["dpop"],
+        "dpop_signing_alg_values_supported": ["ES256", "RS256"],
+        "dpop_nonce_lifetime": 300,  # 5 minutes
+        "dpop_nonce_required": True,
+        "resource_documentation": "https://modelcontextprotocol.io/docs/oauth",
+        "resource_policy_uri": "https://modelcontextprotocol.io/docs/oauth/policy",
+        "resource_tos_uri": "https://modelcontextprotocol.io/docs/oauth/terms"
     }
 
 def main():

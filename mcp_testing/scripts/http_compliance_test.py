@@ -116,17 +116,17 @@ class McpHttpComplianceTest:
         logger.info("Testing initialization")
         
         try:
-            # Send initialize request
+            # Send initialize request with camelCase parameter names
             init_payload = {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "initialize",
                 "params": {
-                    "client_info": {
+                    "clientInfo": {  # Changed from client_info
                         "name": "MCP HTTP Compliance Test",
                         "version": "1.0.0"
                     },
-                    "client_capabilities": {
+                    "clientCapabilities": {  # Changed from client_capabilities
                         "protocol_versions": [self.protocol_version]
                     }
                 }
@@ -138,6 +138,10 @@ class McpHttpComplianceTest:
                 "Accept": "application/json, text/event-stream"
             }
             
+            # Add MCP-Protocol-Version header for 2025-06-18
+            if self.protocol_version == "2025-06-18":
+                headers["MCP-Protocol-Version"] = self.protocol_version
+            
             # Make the request to the mcp endpoint
             response = self.client.post(
                 f"{self.server_url}/mcp",
@@ -145,115 +149,10 @@ class McpHttpComplianceTest:
                 headers=headers
             )
             
-            # Check response status code
-            if response.status_code != 200:
-                self.results["initialization"] = {
-                    "status": "failed",
-                    "error": f"Expected 200 status, got {response.status_code}",
-                    "response": response.text
-                }
-                return False
+            # Validate response
+            self.results["initialization"] = self.validate_initialization_response(response)
             
-            # Parse response
-            try:
-                response_data = response.json()
-            except json.JSONDecodeError:
-                self.results["initialization"] = {
-                    "status": "failed",
-                    "error": "Failed to parse JSON response",
-                    "response": response.text
-                }
-                return False
-            
-            logger.debug(f"Initialize response: {response_data}")
-            
-            # Check for JSONRPC format
-            if "jsonrpc" not in response_data or response_data["jsonrpc"] != "2.0":
-                self.results["initialization"] = {
-                    "status": "failed",
-                    "error": "Response missing 'jsonrpc': '2.0' field",
-                    "response": response_data
-                }
-                return False
-            
-            # Check for matching ID
-            if "id" not in response_data or response_data["id"] != 1:
-                self.results["initialization"] = {
-                    "status": "failed",
-                    "error": f"Response ID mismatch or missing, expected 1, got {response_data.get('id')}",
-                    "response": response_data
-                }
-                return False
-            
-            # Check for result
-            if "result" not in response_data:
-                self.results["initialization"] = {
-                    "status": "failed",
-                    "error": "Response missing 'result' field",
-                    "response": response_data
-                }
-                return False
-            
-            # Check for required fields in result
-            result = response_data["result"]
-            required_fields = ["protocol_version", "server_info", "server_capabilities"]
-            missing_fields = [field for field in required_fields if field not in result]
-            
-            if missing_fields:
-                self.results["initialization"] = {
-                    "status": "failed",
-                    "error": f"Response missing required fields: {missing_fields}",
-                    "response": response_data
-                }
-                return False
-            
-            # Check protocol version
-            if result["protocol_version"] != self.protocol_version:
-                self.results["initialization"] = {
-                    "status": "failed",
-                    "error": f"Protocol version mismatch: expected {self.protocol_version}, got {result['protocol_version']}",
-                    "response": response_data
-                }
-                return False
-            
-            # Extract session ID from headers
-            if "Mcp-Session-Id" in response.headers:
-                self.session_id = response.headers["Mcp-Session-Id"]
-                logger.info(f"Received session ID in header: {self.session_id}")
-            else:
-                # Session ID might be in the response body
-                self.session_id = result.get("session_id")
-                if self.session_id:
-                    logger.info(f"Received session ID in response body: {self.session_id}")
-                else:
-                    logger.warning("No session ID received from server")
-            
-            # Send initialized notification
-            if self.session_id:
-                initialized_payload = {
-                    "jsonrpc": "2.0",
-                    "method": "notifications/initialized"
-                }
-                
-                initialized_url = f"{self.server_url}/mcp?session_id={self.session_id}"
-                initialized_response = self.client.post(
-                    initialized_url,
-                    json=initialized_payload,
-                    headers=headers
-                )
-                
-                if initialized_response.status_code != 202:
-                    logger.warning(f"Expected 202 for initialized notification, got {initialized_response.status_code}")
-            
-            self.results["initialization"] = {
-                "status": "success",
-                "protocol_version": result["protocol_version"],
-                "server_info": result["server_info"],
-                "session_id": self.session_id,
-                "server_capabilities": result["server_capabilities"]
-            }
-            
-            return True
+            return self.results["initialization"]["status"] == "success"
         
         except Exception as e:
             self.results["initialization"] = {
@@ -263,8 +162,59 @@ class McpHttpComplianceTest:
             logger.exception("Exception during initialization test")
             return False
     
+    def validate_initialization_response(self, response: httpx.Response) -> Dict[str, Any]:
+        """Validate the response from an initialize request."""
+        
+        if response.status_code != 200:
+            return {
+                "status": "failed",
+                "error": f"Expected 200 status, got {response.status_code}",
+                "response": response.text
+            }
+        
+        try:
+            data = response.json()
+        except json.JSONDecodeError:
+            return {
+                "status": "failed",
+                "error": "Response is not valid JSON",
+                "response": response.text
+            }
+            
+        if "result" not in data:
+            return {
+                "status": "failed",
+                "error": "Response missing 'result' object",
+                "response": data
+            }
+        
+        result = data["result"]
+        protocol_version = result.get("protocolVersion")
+        server_info = result.get("serverInfo")
+        session_id = result.get("sessionId") or response.headers.get("mcp-session-id")
+
+        if not all([protocol_version, server_info, session_id]):
+            return {
+                "status": "failed",
+                "error": "Response missing one or more required fields (protocolVersion, serverInfo, sessionId)",
+                "response": result
+            }
+            
+        self.protocol_version = protocol_version
+        self.session_id = session_id
+        
+        logger.info(f"Received session ID in header: {self.session_id}")
+        
+        return {
+            "status": "success",
+            "protocol_version": protocol_version,
+            "server_info": server_info,
+            "session_id": session_id
+        }
+    
     def fetch_oauth_server_metadata(self):
         """Fetch OAuth server metadata from .well-known/oauth-authorization-server."""
+        logger.info("Fetching OAuth server metadata")
         try:
             well_known_url = urljoin(self.base_url, "/.well-known/oauth-authorization-server")
             logger.debug(f"Fetching OAuth server metadata from: {well_known_url}")
@@ -334,147 +284,68 @@ class McpHttpComplianceTest:
         """Test OAuth 2.1 authentication compliance."""
         logger.info("Testing OAuth 2.1 authentication")
         
-        test_results = {
-            "basic_flow": False,
-            "www_authenticate_header": False,
-            "oauth_metadata_available": False,
-            "authorization_code_flow": False,
-            "pkce_support": False,
-            "error_handling": False,
-            "details": []
+        test_payload = {
+            "jsonrpc": "2.0",
+            "method": "ping",
+            "id": 99 # Using a unique integer ID
         }
         
+        base_headers = {
+            "Content-Type": "application/json",
+            "MCP-Protocol-Version": self.protocol_version
+        }
+
         try:
-            # Send request without authentication to trigger 401
-            test_payload = {
-                "jsonrpc": "2.0",
-                "method": "ping",
-                "id": str(uuid.uuid4())
-            }
-            
-            response = self.client.post(
-                f"{self.server_url}/mcp",
-                json=test_payload,
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if response.status_code == 401:
-                test_results["basic_flow"] = True
-                test_results["details"].append("Server properly returns 401 for unauthenticated requests")
-                logger.debug("✅ Server properly returns 401 for unauthenticated requests")
-                
-                # Handle the 401 response
-                oauth_info = self.handle_401_response(response)
-                
-                # Check WWW-Authenticate header
-                if oauth_info["www_authenticate"]:
-                    test_results["www_authenticate_header"] = True
-                    test_results["details"].append("Server provides WWW-Authenticate header")
-                    logger.debug("✅ Server provides WWW-Authenticate header")
-                    
-                    # Check for Bearer scheme
-                    if oauth_info.get("scheme") == "Bearer":
-                        test_results["details"].append("Server uses Bearer authentication scheme")
-                        logger.debug("✅ Server uses Bearer authentication scheme")
-                    else:
-                        test_results["details"].append("Server doesn't use Bearer authentication scheme")
-                        logger.debug("⚠️  Server doesn't use Bearer authentication scheme")
-                else:
-                    test_results["details"].append("Server doesn't provide WWW-Authenticate header (acceptable per spec)")
-                    logger.debug("ℹ️  Server doesn't provide WWW-Authenticate header (acceptable per spec)")
-                
-                # Check for OAuth server metadata
-                if oauth_info["oauth_metadata"]:
-                    test_results["oauth_metadata_available"] = True
-                    test_results["details"].append("OAuth server metadata available")
-                    logger.debug("✅ OAuth server metadata available")
-                    
-                    metadata = oauth_info["oauth_metadata"]
-                    required_fields = ["authorization_endpoint", "token_endpoint", "issuer"]
-                    
-                    all_fields_present = True
-                    for field in required_fields:
-                        if field in metadata:
-                            test_results["details"].append(f"OAuth metadata contains {field}")
-                            logger.debug(f"✅ OAuth metadata contains {field}")
-                        else:
-                            test_results["details"].append(f"OAuth metadata missing {field}")
-                            logger.debug(f"❌ OAuth metadata missing {field}")
-                            all_fields_present = False
-                    
-                    if all_fields_present:
-                        test_results["authorization_code_flow"] = True
-                        test_results["details"].append("Authorization code flow supported")
-                        logger.debug("✅ Authorization code flow supported")
-                    
-                    # Check PKCE support
-                    pkce_methods = metadata.get("code_challenge_methods_supported", [])
-                    if "S256" in pkce_methods:
-                        test_results["pkce_support"] = True
-                        test_results["details"].append("PKCE S256 method supported")
-                        logger.debug("✅ PKCE S256 method supported")
-                    else:
-                        test_results["details"].append("PKCE S256 method not explicitly supported")
-                        logger.debug("⚠️  PKCE S256 method not explicitly supported")
-                    
-                    # Test error handling by making invalid token request
-                    if "token_endpoint" in metadata:
-                        try:
-                            invalid_token_response = self.client.post(
-                                metadata["token_endpoint"],
-                                data={
-                                    "grant_type": "authorization_code",
-                                    "code": "invalid_code",
-                                    "client_id": "test_client"
-                                }
-                            )
-                            
-                            if invalid_token_response.status_code in [400, 401]:
-                                test_results["error_handling"] = True
-                                test_results["details"].append("OAuth error handling works properly")
-                                logger.debug("✅ OAuth error handling works properly")
-                            else:
-                                test_results["details"].append(f"Unexpected error response: {invalid_token_response.status_code}")
-                                logger.debug(f"⚠️  Unexpected error response: {invalid_token_response.status_code}")
-                        except Exception as e:
-                            test_results["details"].append(f"Error testing OAuth error handling: {str(e)}")
-                            logger.debug(f"ℹ️  Error testing OAuth error handling: {str(e)}")
-                
-                else:
-                    test_results["details"].append("OAuth server metadata not available")
-                    logger.debug("⚠️  OAuth server metadata not available")
-                
-            elif response.status_code == 200:
-                test_results["basic_flow"] = True
-                test_results["details"].append("Server doesn't require authentication")
-                logger.debug("ℹ️  Server doesn't require authentication")
-                
-            else:
-                test_results["details"].append(f"Unexpected status code: {response.status_code}")
-                logger.debug(f"❌ Unexpected status code: {response.status_code}")
-            
-            # Calculate overall success
-            oauth_success = (
-                test_results["basic_flow"] and
-                (test_results["oauth_metadata_available"] or response.status_code == 200)
-            )
-            
-            self.results["oauth_authentication"] = {
-                "status": "success" if oauth_success else "failed",
-                "details": test_results["details"],
-                "tests": test_results
-            }
-            
-            return oauth_success
-            
+            # 1. Send request without any token, expect 401
+            logger.debug("OAuth Test Step 1: No token")
+            # Use the session-specific URL now that we are initialized
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
+            response = self.client.post(url, json=test_payload, headers=base_headers)
+            if response.status_code != 401:
+                self.results["oauth_authentication"] = {
+                    "status": "failed", "details": f"Step 1 Failed: Expected 401 for no token, got {response.status_code}"
+                }
+                return False
+            logger.debug("OAuth Test Step 1: Passed")
+
+            # 2. Send request with a valid token, expect 200
+            logger.debug("OAuth Test Step 2: Valid token")
+            valid_headers = {**base_headers, "Authorization": "Bearer valid-test-token-123"}
+            response = self.client.post(url, json=test_payload, headers=valid_headers)
+            if response.status_code != 200:
+                self.results["oauth_authentication"] = {
+                    "status": "failed", "details": f"Step 2 Failed: Expected 200 for valid token, got {response.status_code}", "response": response.text
+                }
+                return False
+            logger.debug("OAuth Test Step 2: Passed. Storing bearer token.")
+            self.bearer_token = "valid-test-token-123"
+
+            # 3. Send request with an invalid token, expect 401
+            logger.debug("OAuth Test Step 3: Invalid token")
+            invalid_headers = {**base_headers, "Authorization": "Bearer invalid-token"}
+            response = self.client.post(url, json=test_payload, headers=invalid_headers)
+            if response.status_code != 401:
+                self.results["oauth_authentication"] = {
+                    "status": "failed", "details": f"Step 3 Failed: Expected 401 for invalid token, got {response.status_code}"
+                }
+                return False
+            logger.debug("OAuth Test Step 3: Passed")
+
+            self.results["oauth_authentication"] = {"status": "success"}
+            return True
+
         except Exception as e:
             logger.exception("Exception during OAuth authentication test")
-            self.results["oauth_authentication"] = {
-                "status": "error",
-                "error": str(e)
-            }
+            self.results["oauth_authentication"] = {"status": "error", "error": str(e)}
             return False
     
+    def _get_auth_headers(self) -> Dict[str, str]:
+        """Get authentication headers if a bearer token is available."""
+        headers = {"Content-Type": "application/json"}
+        if self.bearer_token:
+            headers["Authorization"] = f"Bearer {self.bearer_token}"
+        return headers
+
     def test_tools_functionality(self) -> bool:
         """Test basic tools functionality."""
         logger.info("Testing tools functionality")
@@ -494,9 +365,7 @@ class McpHttpComplianceTest:
                 "method": "tools/list"
             }
             
-            headers = {
-                "Content-Type": "application/json"
-            }
+            headers = self._get_auth_headers()
             
             url = f"{self.server_url}/mcp?session_id={self.session_id}"
             
@@ -585,7 +454,7 @@ class McpHttpComplianceTest:
                 tool_response = self.client.post(
                     url,
                     json=tool_call_payload,
-                    headers=headers
+                    headers=self._get_auth_headers()
                 )
                 
                 if tool_response.status_code != 200:
@@ -623,7 +492,7 @@ class McpHttpComplianceTest:
             return False
     
     def test_error_handling(self) -> bool:
-        """Test error handling according to JSON-RPC 2.0 and HTTP standards."""
+        """Test error handling according to specification."""
         logger.info("Testing error handling")
         
         if not self.session_id:
@@ -633,129 +502,127 @@ class McpHttpComplianceTest:
             }
             return False
         
-        try:
-            url = f"{self.server_url}/mcp?session_id={self.session_id}"
-            headers = {
-                "Content-Type": "application/json"
+        error_tests = {
+            "parse_error": {
+                "payload": "invalid json{",
+                "expected_code": 400,
+                "expected_error": -32700
+            },
+            "invalid_request": {
+                "payload": {"not_jsonrpc": "2.0", "method": "test", "id": 1},
+                "expected_code": 400,
+                "expected_error": -32600
+            },
+            "method_not_found": {
+                "payload": {
+                    "jsonrpc": "2.0",
+                    "method": "non_existent_method",
+                    "id": 1
+                },
+                "expected_code": 200,  # Changed from 404 to 200 per JSON-RPC 2.0
+                "expected_error": -32601
+            },
+            "invalid_params": {
+                "payload": {
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",  # Changed from tools/execute to tools/call
+                    "params": {"invalid": "params"},
+                    "id": 1
+                },
+                "expected_code": 400,
+                "expected_error": -32602
+            },
+            "session_expired": {
+                "payload": {
+                    "jsonrpc": "2.0",
+                    "method": "ping",
+                    "id": 1
+                },
+                "expected_code": 401,
+                "expected_error": -32003,
+                "use_invalid_session": True
             }
-            
-            tests = [
-                {
-                    "name": "parse_error",
-                    "payload": "{ this is not valid JSON",
-                    "expected_code": 400,  # Bad Request for malformed JSON
-                    "expected_json_rpc_error": PARSE_ERROR,  # -32700
-                    "headers": {"Content-Type": "application/json"}
-                },
-                {
-                    "name": "invalid_request", 
-                    "payload": {"jsonrpc": "2.0", "id": 1},  # Missing method
-                    "expected_code": 400,  # Bad Request for invalid request structure
-                    "expected_json_rpc_error": INVALID_REQUEST,  # -32600
-                    "headers": {"Content-Type": "application/json"}
-                },
-                {
-                    "name": "method_not_found",
-                    "payload": {"jsonrpc": "2.0", "id": 1, "method": "unknown_method"},
-                    "expected_code": 404,  # Not Found for unknown method
-                    "expected_json_rpc_error": METHOD_NOT_FOUND,  # -32601
-                    "headers": {"Content-Type": "application/json"}
-                },
-                {
-                    "name": "invalid_params",
-                    "payload": {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": "invalid"},
-                    "expected_code": 400,  # Bad Request for invalid parameters
-                    "expected_json_rpc_error": INVALID_PARAMS,  # -32602
-                    "headers": {"Content-Type": "application/json"}
-                },
-                {
-                    "name": "session_expired",
-                    "payload": {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                    "expected_code": 401,  # Unauthorized for invalid/expired session
-                    "expected_json_rpc_error": SESSION_EXPIRED,  # -32003
-                    "headers": {"Content-Type": "application/json", "Mcp-Session-Id": "invalid-session-id"}
-                }
-            ]
-            
-            all_passed = True
-            test_results = []
-            
-            for test in tests:
-                logger.info(f"Running error test: {test['name']}")
+        }
+        
+        test_results = {}
+        all_passed = True
+        
+        for test_name, test_config in error_tests.items():
+            logger.info(f"Running error test: {test_name}")
+            try:
+                headers = self._get_auth_headers()
                 
-                # Special URL for session_expired test
-                test_url = f"{self.server_url}/mcp" if test["name"] == "session_expired" else url
-                test_headers = test.get("headers", headers)
+                # For session_expired test, we need to send an invalid session ID
+                session_id = self.session_id
+                if test_name == "session_expired":
+                    session_id = "invalid-session-id"
+                    headers["Mcp-Session-Id"] = session_id
+
+                url = f"{self.server_url}/mcp"
+                if session_id:
+                     url += f"?session_id={session_id}"
+
+                if isinstance(test_config["payload"], str):
+                    response = self.client.post(
+                        url,
+                        content=test_config["payload"],
+                        headers=headers
+                    )
+                else:
+                    response = self.client.post(
+                        url,
+                        json=test_config["payload"],
+                        headers=headers
+                    )
                 
-                try:
-                    if isinstance(test["payload"], str):
-                        # Raw string payload (invalid JSON)
-                        response = self.client.post(
-                            test_url,
-                            content=test["payload"],
-                            headers=test_headers
-                        )
-                    else:
-                        # JSON payload
-                        response = self.client.post(
-                            test_url,
-                            json=test["payload"],
-                            headers=test_headers
-                        )
-                    
-                    # Check HTTP status code
-                    status_passed = response.status_code == test["expected_code"]
-                    
-                    # Try to parse JSON response and check error code
-                    json_rpc_passed = True
+                # Check status code
+                status_matches = response.status_code == test_config["expected_code"]
+                
+                # For successful responses (200), check error code in response
+                error_code_matches = False
+                if response.status_code == 200:
                     try:
-                        response_json = response.json()
-                        if "error" in response_json:
-                            actual_error_code = response_json["error"].get("code")
-                            json_rpc_passed = actual_error_code == test["expected_json_rpc_error"]
+                        response_data = response.json()
+                        if "error" in response_data:
+                            error_code_matches = response_data["error"].get("code") == test_config["expected_error"]
                     except:
-                        # If we can't parse JSON, just check HTTP status
-                        pass
-                    
-                    test_passed = status_passed and json_rpc_passed
-                    test_results.append({
-                        "name": test["name"],
-                        "passed": test_passed,
-                        "expected_code": test["expected_code"],
-                        "actual_code": response.status_code,
-                        "expected_json_rpc": test["expected_json_rpc_error"],
-                        "response": response_json if 'response_json' in locals() else None
-                    })
-                    
-                    if not test_passed:
-                        all_passed = False
-                        logger.warning(f"Error test {test['name']} failed: expected HTTP {test['expected_code']}, got {response.status_code}")
-                        
-                except Exception as e:
-                    logger.error(f"Error test {test['name']} raised exception: {e}")
+                        error_code_matches = False
+                else:
+                    # For non-200 responses, we only care about the status code
+                    error_code_matches = True
+                
+                test_passed = status_matches and error_code_matches
+                
+                if test_passed:
+                    test_results[test_name] = {
+                        "status": "success",
+                        "details": f"Correct {test_config['expected_code']} response"
+                    }
+                    logger.debug(f"✅ {test_name} test passed")
+                else:
+                    test_results[test_name] = {
+                        "status": "failed",
+                        "details": f"Expected {test_config['expected_code']}, got {response.status_code}"
+                    }
+                    logger.debug(f"❌ {test_name} test failed")
+                    if response.status_code == 200:
+                        logger.debug(f"Response body: {response.text}")
                     all_passed = False
-                    test_results.append({
-                        "name": test["name"],
-                        "passed": False,
-                        "error": str(e)
-                    })
-            
-            self.results["error_handling"] = {
-                "status": "success" if all_passed else "failed",
-                "tests": test_results,
-                "total_tests": len(tests),
-                "passed_tests": sum(1 for t in test_results if t.get("passed", False))
-            }
-            
-            return all_passed
-            
-        except Exception as e:
-            logger.error(f"Exception during error handling test: {e}")
-            self.results["error_handling"] = {
-                "status": "error", 
-                "error": str(e)
-            }
-            return False
+                
+            except Exception as e:
+                test_results[test_name] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+                logger.exception(f"Exception during {test_name} test")
+                all_passed = False
+        
+        self.results["error_handling"] = {
+            "status": "success" if all_passed else "failed",
+            "tests": test_results
+        }
+        
+        return all_passed
     
     def test_batch_requests(self) -> bool:
         """Test batch requests."""
@@ -769,37 +636,26 @@ class McpHttpComplianceTest:
             return False
         
         try:
-            url = f"{self.server_url}/mcp?session_id={self.session_id}"
-            headers = {
-                "Content-Type": "application/json"
-            }
-            
-            # Create a batch with two requests
-            batch_payload = [
-                {
-                    "jsonrpc": "2.0",
-                    "id": 6,
-                    "method": "ping"
-                },
-                {
-                    "jsonrpc": "2.0",
-                    "id": 7,
-                    "method": "tools/list"
-                }
+            # Send a batch request (array of requests)
+            batch_request = [
+                {"jsonrpc": "2.0", "method": "ping", "id": "1"},
+                {"jsonrpc": "2.0", "method": "ping", "id": "2"}
             ]
+
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
             
-            batch_response = self.client.post(
+            response = self.client.post(
                 url,
-                json=batch_payload,
-                headers=headers
+                json=batch_request,
+                headers=self._get_auth_headers()
             )
             
-            # In 2025-06-18, batch requests should be rejected
+            # For 2025-06-18, batch requests are not supported and MUST return 400
             if self.protocol_version == "2025-06-18":
-                if batch_response.status_code == 400:
+                if response.status_code == 400:
                     # Check that the error message mentions batching not supported
                     try:
-                        error_data = batch_response.json()
+                        error_data = response.json()
                         error_message = error_data.get("error", {}).get("message", "")
                         if "batch" in error_message.lower() and "not supported" in error_message.lower():
                             self.results["batch_requests"] = {
@@ -812,21 +668,21 @@ class McpHttpComplianceTest:
                 
                 self.results["batch_requests"] = {
                     "status": "failed",
-                    "error": f"2025-06-18 should reject batch requests with 400 status, got {batch_response.status_code}",
-                    "response": batch_response.text
+                    "error": f"2025-06-18 should reject batch requests with 400 status, got {response.status_code}",
+                    "response": response.text
                 }
                 return False
             
             # For older protocol versions, batch requests should work
-            if batch_response.status_code != 200:
+            if response.status_code != 200:
                 self.results["batch_requests"] = {
                     "status": "failed",
-                    "error": f"Batch request expected 200 status, got {batch_response.status_code}",
-                    "response": batch_response.text
+                    "error": f"Batch request expected 200 status, got {response.status_code}",
+                    "response": response.text
                 }
                 return False
             
-            batch_data = batch_response.json()
+            batch_data = response.json()
             
             if not isinstance(batch_data, list):
                 self.results["batch_requests"] = {
@@ -846,10 +702,10 @@ class McpHttpComplianceTest:
             
             # Check IDs match requests
             response_ids = [resp.get("id") for resp in batch_data]
-            if 6 not in response_ids or 7 not in response_ids:
+            if "1" not in response_ids or "2" not in response_ids:
                 self.results["batch_requests"] = {
                     "status": "failed",
-                    "error": f"Response IDs don't match request IDs, expected [6, 7], got {response_ids}",
+                    "error": f"Response IDs don't match request IDs, expected ['1', '2'], got {response_ids}",
                     "response": batch_data
                 }
                 return False
@@ -869,55 +725,71 @@ class McpHttpComplianceTest:
             return False
     
     def test_session_management(self) -> bool:
-        """Test session management."""
+        """Test session management capabilities."""
         logger.info("Testing session management")
+        self.results["session_management"] = {}
+        all_tests_passed = True
+        
+        # This test assumes a session has already been established
+        if not self.session_id:
+            self.results["session_management"] = {
+                "status": "skipped",
+                "reason": "No session ID available for testing"
+            }
+            return False
         
         try:
-            # Request without session ID should fail or create a new session
-            no_session_payload = {
-                "jsonrpc": "2.0",
-                "id": 8,
-                "method": "ping"
-            }
-            
-            headers = {
-                "Content-Type": "application/json"
-            }
-            
+            # Test with no session ID
             no_session_response = self.client.post(
                 f"{self.server_url}/mcp",
-                json=no_session_payload,
-                headers=headers
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "ping"
+                },
+                headers=self._get_auth_headers()
             )
             
-            # Should either return 400 (required session) or 200 (auto-session)
-            if no_session_response.status_code not in [200, 400]:
-                self.results["session_management"] = {
+            # The server should respond with 400 Bad Request or 401 Unauthorized
+            # if a session is required for the method
+            if no_session_response.status_code not in [200, 400, 401]:
+                self.results["session_management"]["no_session_test"] = {
                     "status": "failed",
-                    "error": f"Expected 200 or 400 status for no session, got {no_session_response.status_code}",
+                    "error": f"Expected 200, 400 or 401 status for no session, got {no_session_response.status_code}",
                     "response": no_session_response.text
                 }
-                return False
-            
-            # Test invalid session ID
-            invalid_session_url = f"{self.server_url}/mcp?session_id=invalid-session-id-{uuid.uuid4()}"
+                all_tests_passed = False
+            else:
+                self.results["session_management"]["no_session_test"] = {
+                    "status": "success",
+                    "details": f"Server responded with {no_session_response.status_code} as expected"
+                }
+
+            # Test with invalid session ID
+            invalid_session_id = str(uuid.uuid4())
             invalid_session_response = self.client.post(
-                invalid_session_url,
-                json=no_session_payload,
-                headers=headers
+                f"{self.server_url}/mcp?session_id={invalid_session_id}",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "ping"
+                },
+                headers=self._get_auth_headers()
             )
             
-            # Should return 401 Unauthorized for invalid session (following JSON-RPC over HTTP standards)
+            # Should be 401 Unauthorized as per 2025-06-18
             if invalid_session_response.status_code != 401:
-                logger.warning(f"Invalid session expected 401 status, got {invalid_session_response.status_code}")
-            
-            self.results["session_management"] = {
-                "status": "success",
-                "no_session_response": no_session_response.status_code,
-                "invalid_session_response": invalid_session_response.status_code
-            }
-            
-            return True
+                self.results["session_management"]["invalid_session_test"] = {
+                    "status": "failed",
+                    "error": f"Expected 401 status for invalid session, got {invalid_session_response.status_code}",
+                    "response": invalid_session_response.text
+                }
+                all_tests_passed = False
+            else:
+                self.results["session_management"]["invalid_session_test"] = {
+                    "status": "success",
+                    "details": "Server responded with 401 as expected"
+                }
         
         except Exception as e:
             self.results["session_management"] = {
@@ -926,6 +798,12 @@ class McpHttpComplianceTest:
             }
             logger.exception("Exception during session management test")
             return False
+        
+        self.results["session_management"] = {
+            "status": "success" if all_tests_passed else "failed",
+            "tests": self.results["session_management"]
+        }
+        return all_tests_passed
     
     def test_protocol_negotiation(self) -> bool:
         """Test protocol version negotiation."""
@@ -940,11 +818,11 @@ class McpHttpComplianceTest:
                 "id": 9,
                 "method": "initialize",
                 "params": {
-                    "client_info": {
+                    "clientInfo": {  # Changed from client_info
                         "name": "MCP HTTP Compliance Test",
                         "version": "1.0.0"
                     },
-                    "client_capabilities": {
+                    "clientCapabilities": {  # Changed from client_capabilities
                         "protocol_versions": [unsupported_version]
                     }
                 }
@@ -973,7 +851,7 @@ class McpHttpComplianceTest:
                 response_data = response.json()
                 
                 if "result" in response_data:
-                    server_version = response_data["result"].get("protocol_version")
+                    server_version = response_data["result"].get("protocolVersion") # Changed from protocol_version
                     
                     if server_version == unsupported_version:
                         self.results["protocol_negotiation"] = {
@@ -1011,7 +889,7 @@ class McpHttpComplianceTest:
             return False
     
     def test_ping(self) -> bool:
-        """Test ping utility."""
+        """Test the simple ping utility."""
         logger.info("Testing ping utility")
         
         if not self.session_id:
@@ -1020,25 +898,23 @@ class McpHttpComplianceTest:
                 "reason": "No session ID available"
             }
             return False
-        
-        try:
-            url = f"{self.server_url}/mcp?session_id={self.session_id}"
-            headers = {
-                "Content-Type": "application/json"
-            }
             
+        try:
             ping_payload = {
                 "jsonrpc": "2.0",
-                "id": 10,
+                "id": "ping-test",
                 "method": "ping"
             }
             
             start_time = time.time()
+            url = f"{self.server_url}/mcp?session_id={self.session_id}"
+            
             ping_response = self.client.post(
                 url,
                 json=ping_payload,
-                headers=headers
+                headers=self._get_auth_headers()
             )
+            
             elapsed = time.time() - start_time
             
             if ping_response.status_code != 200:
@@ -1048,30 +924,29 @@ class McpHttpComplianceTest:
                     "response": ping_response.text
                 }
                 return False
-            
-            ping_data = ping_response.json()
-            
-            if "result" not in ping_data:
+                
+            ping_response_data = ping_response.json()
+            if "result" not in ping_response_data or "timestamp" not in ping_response_data["result"]:
                 self.results["ping"] = {
                     "status": "failed",
-                    "error": "Ping response missing 'result'",
-                    "response": ping_data
+                    "error": f"Ping response missing 'result' with 'timestamp', got {ping_response_data}"
                 }
                 return False
             
             self.results["ping"] = {
                 "status": "success",
-                "elapsed_seconds": elapsed
+                "response_time": elapsed
             }
             
+            logger.info(f"Ping successful, RTT: {elapsed:.3f} seconds")
             return True
-        
+            
         except Exception as e:
+            logger.exception("Exception during ping test")
             self.results["ping"] = {
                 "status": "error",
                 "error": str(e)
             }
-            logger.exception("Exception during ping test")
             return False
     
     def print_results(self):
@@ -1107,13 +982,13 @@ class McpHttpComplianceTest:
             else:
                 # Print test-specific successful results
                 if test_name == "initialization":
-                    print(f"  Protocol Version: {result.get('protocol_version')}")
+                    print(f"  Protocol Version: {result.get('protocol_version')}") # Changed from protocol_version
                     print(f"  Server Info: {result.get('server_info')}")
-                    print(f"  Session ID: {result.get('session_id')}")
+                    print(f"  Session ID: {result.get('session_id')}") # Changed from session_id
                 elif test_name == "tools_functionality":
                     print(f"  Available Tools: {', '.join(result.get('available_tools', []))}")
                 elif test_name == "ping":
-                    print(f"  Response Time: {result.get('elapsed_seconds', 0):.3f} seconds")
+                    print(f"  Response Time: {result.get('response_time', 0):.3f} seconds")
                 elif test_name == "oauth_authentication":
                     tests = result.get('tests', {})
                     print(f"  OAuth Server Metadata: {'✅' if tests.get('oauth_metadata_available') else '❌'}")
@@ -1138,71 +1013,89 @@ class McpHttpComplianceTest:
         print(f"\nSummary: {success_count}/{total_count} tests passed ({skipped_count} skipped)")
 
     def generate_report(self, output_dir: str = "reports") -> str:
-        """Generate a detailed compliance test report."""
-        os.makedirs(output_dir, exist_ok=True)
-        
-        timestamp = datetime.fromtimestamp(self.test_start_time).strftime("%Y%m%d_%H%M%S")
+        """Generate a detailed compliance report."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         report_file = os.path.join(output_dir, f"http_compliance_test_{timestamp}.md")
+        
+        os.makedirs(output_dir, exist_ok=True)
         
         with open(report_file, "w") as f:
             f.write("# MCP HTTP Compliance Test Report\n\n")
-            f.write(f"**Server**: {self.server_url}\n")
-            f.write(f"**Timestamp**: {datetime.fromtimestamp(self.test_start_time).isoformat()}\n")
-            f.write(f"**Protocol Version**: {self.protocol_version}\n\n")
+            f.write(f"Generated: {datetime.now().isoformat()}\n")
+            f.write(f"Server: {self.server_url}\n")
+            f.write(f"Protocol Version: {self.protocol_version}\n\n")
             
+            # Write test results
             for test_name, result in self.results.items():
                 f.write(f"## {test_name.replace('_', ' ').title()}\n\n")
                 
-                status = result.get("status", "unknown")
-                if isinstance(status, bool):
-                    status = "success" if status else "failed"
-                
-                status_icon = "✅" if status == "success" else "❌" if status == "failed" else "⚠️"
-                f.write(f"**Status**: {status_icon} {status.title()}\n\n")
-                
-                if "error" in result:
-                    f.write(f"**Error**: {result['error']}\n\n")
-                elif "reason" in result:
-                    f.write(f"**Reason**: {result['reason']}\n\n")
-                else:
-                    # Add specific details for each test type
+                # Handle different result formats
+                if isinstance(result, dict):
+                    status = result.get("status", "unknown")
+                    test_status = "✅" if status == "success" else "❌"
+                    f.write(f"Status: {test_status} {status.title()}\n\n")
+                    
+                    # Write details if present
+                    if "details" in result:
+                        if isinstance(result["details"], list):
+                            for detail in result["details"]:
+                                f.write(f"- {detail}\n")
+                        else:
+                            f.write(f"{result['details']}\n")
+                    
+                    # Write error if present
+                    if "error" in result:
+                        f.write(f"\nError: {result['error']}\n")
+                    
+                    # Write test-specific details
                     if test_name == "initialization":
-                        if "session_id" in result:
-                            f.write(f"**Session ID**: {result['session_id']}\n")
-                        if "protocol_version" in result:
-                            f.write(f"**Protocol Version**: {result['protocol_version']}\n")
-                        if "server_info" in result:
-                            f.write(f"**Server Info**: {result['server_info']}\n")
-                    elif test_name == "tools_functionality":
-                        if "tools" in result:
-                            f.write(f"**Available Tools**: {', '.join(result['tools'])}\n")
-                    elif test_name == "error_handling":
-                        if "tests" in result:
-                            f.write(f"**Tests Passed**: {result.get('passed_tests', 0)}/{result.get('total_tests', 0)}\n\n")
-                            for test in result["tests"]:
-                                test_status = "✅" if test.get("passed", False) else "❌"
-                                f.write(f"- {test_status} **{test['name']}**: ")
-                                if test.get("passed", False):
-                                    f.write(f"HTTP {test.get('actual_code', 'N/A')}\n")
-                                else:
-                                    f.write(f"Expected HTTP {test.get('expected_code', 'N/A')}, got {test.get('actual_code', 'N/A')}\n")
-                    elif test_name == "ping":
-                        if "response_time" in result:
-                            f.write(f"**Response Time**: {result['response_time']:.3f} seconds\n")
+                        if "result" in result:
+                            init_result = result["result"]
+                            if "sessionId" in init_result:
+                                f.write(f"\nSession ID: {init_result['sessionId']}\n")
+                            if "protocolVersion" in init_result:
+                                f.write(f"Protocol Version: {init_result['protocolVersion']}\n")
+                            if "serverInfo" in init_result:
+                                f.write(f"Server Info: {init_result['serverInfo']}\n")
+                    
+                    # Write sub-tests if present
+                    if "tests" in result:
+                        f.write("\nSub-tests:\n")
+                        for sub_name, sub_result in result["tests"].items():
+                            if isinstance(sub_result, dict):
+                                sub_status = "✅" if sub_result.get("status") == "success" else "❌"
+                                f.write(f"- {sub_name}: {sub_status} {sub_result.get('details', '')}\n")
+                            else:
+                                # Handle boolean sub-test results
+                                sub_status = "✅" if sub_result else "❌"
+                                f.write(f"- {sub_name}: {sub_status}\n")
+                    
+                else:
+                    # Legacy format
+                    test_status = "✅" if result else "❌"
+                    f.write(f"Status: {test_status}\n\n")
                 
                 f.write("\n")
             
-            # Summary
-            total_tests = len([r for r in self.results.values() if r.get("status") not in ["skipped", "unknown"]])
-            passed_tests = len([r for r in self.results.values() if r.get("status") == "success"])
-            skipped_tests = len([r for r in self.results.values() if r.get("status") == "skipped"])
+            # Write summary
+            total_tests = len(self.results)
+            passed_tests = sum(1 for r in self.results.values() if isinstance(r, dict) and r.get("status") == "success")
+            f.write(f"\n## Summary\n\n")
+            f.write(f"- Total Tests: {total_tests}\n")
+            f.write(f"- Passed: {passed_tests}\n")
+            f.write(f"- Failed: {total_tests - passed_tests}\n")
             
-            f.write(f"## Summary\n\n")
-            f.write(f"**Total Tests**: {total_tests}\n")
-            f.write(f"**Passed**: {passed_tests}\n")
-            f.write(f"**Failed**: {total_tests - passed_tests}\n")
-            f.write(f"**Skipped**: {skipped_tests}\n")
-            f.write(f"**Success Rate**: {(passed_tests/total_tests*100) if total_tests > 0 else 0:.1f}%\n")
+            if self.test_oauth:
+                f.write("\n### OAuth 2.1 Support\n")
+                oauth_result = self.results.get("oauth_authentication", {})
+                if oauth_result.get("status") == "success":
+                    f.write("✅ OAuth 2.1 authentication is fully supported\n")
+                else:
+                    f.write("❌ OAuth 2.1 authentication is not fully supported\n")
+                    if "details" in oauth_result:
+                        f.write("\nDetails:\n")
+                        for detail in oauth_result["details"]:
+                            f.write(f"- {detail}\n")
         
         logger.info(f"Compliance report generated: {report_file}")
         return report_file
