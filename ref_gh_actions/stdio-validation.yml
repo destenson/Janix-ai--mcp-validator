@@ -8,6 +8,11 @@ on:
     branches: [ main, master ]  # Adjust branch names as needed
   workflow_dispatch:  # Allows manual triggering
 
+# IMPORTANT: Before using this template:
+# 1. Update SERVER_PATH below to point to your actual STDIO server file
+# 2. Ensure your server file is executable and handles STDIO communication
+# 3. Adjust environment variables and dependencies as needed for your server
+
 jobs:
   validate-stdio:
     name: Validate STDIO MCP Server
@@ -39,10 +44,7 @@ jobs:
           python -m pip install --upgrade pip
           # Install your server's dependencies
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # Install the MCP validator
-          # Option 1: Install from PyPI once published
-          # pip install mcp-protocol-validator
-          # Option 2: Install from the repo
+          # Install the MCP validator from the repo
           pip install git+https://github.com/janix-ai/mcp-validator.git
       
       - name: Run MCP STDIO Compliance Tests
@@ -50,8 +52,8 @@ jobs:
         run: |
           mkdir -p reports
           
-          # Ensure server file exists and is executable
-          SERVER_PATH="path/to/your/stdio_server.py"
+          # REQUIRED: Update this path to your actual server file!
+          SERVER_PATH="path/to/your/stdio_server.py"  # <-- CHANGE THIS LINE
           if [ ! -f "$SERVER_PATH" ]; then
             echo "Error: Server file not found at $SERVER_PATH"
             exit 1

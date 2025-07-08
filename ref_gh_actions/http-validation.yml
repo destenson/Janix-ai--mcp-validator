@@ -8,6 +8,11 @@ on:
     branches: [ main, master ]  # Adjust branch names as needed
   workflow_dispatch:  # Allows manual triggering
 
+# IMPORTANT: Before using this template:
+# 1. Update SERVER_PATH below to point to your actual HTTP server file
+# 2. Ensure your server implements a health check endpoint or responds to root URL
+# 3. Adjust environment variables and dependencies as needed for your server
+
 jobs:
   validate-http:
     name: Validate HTTP MCP Server
@@ -42,10 +47,7 @@ jobs:
           python -m pip install --upgrade pip
           # Install your server's dependencies
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # Install the MCP validator
-          # Option 1: Install from PyPI once published
-          # pip install mcp-protocol-validator
-          # Option 2: Install from the repo
+          # Install the MCP validator from the repo
           pip install git+https://github.com/janix-ai/mcp-validator.git
           # Install curl for health check
           sudo apt-get update && sudo apt-get install -y curl
@@ -56,7 +58,8 @@ jobs:
           mkdir -p reports
           
           # Configuration
-          SERVER_PATH="path/to/your/http_server.py"
+          # REQUIRED: Update this path to your actual server file!
+          SERVER_PATH="path/to/your/http_server.py"  # <-- CHANGE THIS LINE
           SERVER_PORT="${SERVER_PORT:-8088}"  # Use env var if set, else default to 8088
           SERVER_URL="http://localhost:${SERVER_PORT}"
           MAX_RETRIES=30
