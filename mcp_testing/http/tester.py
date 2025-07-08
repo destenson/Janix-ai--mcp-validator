@@ -927,33 +927,23 @@ class MCPHttpTester:
             return False
 
     def test_status_codes(self):
-        """Test various HTTP status code scenarios with proper OAuth handling."""
-        print("\n=== Testing HTTP Status Codes ===")
+        """Test HTTP status code scenarios that are actually specified in MCP."""
+        print("\n=== Testing HTTP Status Codes (MCP Specification Only) ===")
         
         tests = [
             {
                 "name": "invalid_json",
                 "payload": "{bad json}",
                 "expected_codes": [400],
-                "headers": None
+                "headers": None,
+                "test_description": "Invalid JSON should return 400 (HTTP standard)"
             },
             {
-                "name": "no_method",
+                "name": "missing_method",
                 "payload": {"jsonrpc": "2.0", "id": 1},
                 "expected_codes": [400],
-                "headers": None
-            },
-            {
-                "name": "unknown_method",
-                "payload": {"jsonrpc": "2.0", "id": 1, "method": "unknown_method"},
-                "expected_codes": [404],
-                "headers": None
-            },
-            {
-                "name": "authentication_required",
-                "payload": {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
-                "expected_codes": [401, 200],  # 401 if auth required, 200 if not
-                "headers": {"Mcp-Session-Id": "invalid-session"}
+                "headers": None,
+                "test_description": "Missing method field should return 400 (JSON-RPC requirement)"
             }
         ]
         
@@ -978,24 +968,17 @@ class MCPHttpTester:
                 
                 if response.status_code in test["expected_codes"]:
                     print(f"✅ {test['name']}: Got expected status code {response.status_code}")
-                    
-                    # Special handling for 401 responses
-                    if response.status_code == 401:
-                        oauth_info = self.handle_401_response(dict(response.headers), response.text)
-                        print(f"    OAuth challenge detected: {oauth_info['www_authenticate'] is not None}")
-                        
+                    print(f"    {test['test_description']}")
                 else:
-                    # For authentication_required test, 200 is also acceptable
-                    if test["name"] == "authentication_required" and response.status_code == 200:
-                        print(f"✅ {test['name']}: Server doesn't require authentication (status {response.status_code})")
-                    else:
-                        print(f"❌ {test['name']}: Expected {test['expected_codes']}, got {response.status_code}")
-                        success = False
+                    print(f"❌ {test['name']}: Expected {test['expected_codes']}, got {response.status_code}")
+                    success = False
                     
             except Exception as e:
                 print(f"❌ {test['name']}: Test failed with error: {str(e)}")
                 success = False
-                
+        
+        print("\nNote: Tests for unknown_method and invalid_session have been removed")
+        print("because they test unspecified HTTP implementation details, not MCP specification compliance.")
         return success
 
     def test_headers(self):
@@ -1011,12 +994,12 @@ class MCPHttpTester:
             {
                 "name": "content_type",
                 "required_headers": {"Content-Type": "application/json"},
-                "method": "ping"
+                "method": "server/info"
             },
             {
                 "name": "session_id_present",
                 "required_headers": {"Mcp-Session-Id": None},  # None means just check presence
-                "method": "ping"
+                "method": "server/info"
             }
         ]
         
@@ -1024,7 +1007,7 @@ class MCPHttpTester:
             tests.append({
                 "name": "protocol_version",
                 "required_headers": {"MCP-Protocol-Version": "2025-06-18"},
-                "method": "ping"
+                "method": "server/info"
             })
             
         success = True
@@ -1094,7 +1077,6 @@ class MCPHttpTester:
                     # Handle OAuth requirement
                     oauth_info = self.handle_401_response(response_headers, body)
                     print(f"✅ Version {version}: Server requires authentication (OAuth 2.1)")
-                    success = True
                     continue
                 elif status != 200:
                     print(f"❌ Version {version}: Initialize failed with status {status}")
@@ -1107,10 +1089,12 @@ class MCPHttpTester:
                     continue
                     
                 result = body["result"]
-                server_version = result.get("protocol_version") or result.get("protocolVersion")
+                
+                # Check for protocol version in camelCase (per spec) or snake_case (for compatibility)
+                server_version = result.get("protocolVersion") or result.get("protocol_version")
                 
                 if not server_version:
-                    print(f"❌ Version {version}: Missing protocol_version in response")
+                    print(f"❌ Version {version}: Missing protocolVersion in response")
                     success = False
                     continue
                     

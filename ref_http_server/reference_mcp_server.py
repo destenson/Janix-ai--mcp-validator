@@ -68,23 +68,20 @@ class ServerCapabilities(BaseModel):
 
 class InitializeParams(BaseModel):
     """Parameters for initialize request."""
-    client_info: ClientInfo
-    client_capabilities: ClientCapabilities
+    client_info: ClientInfo = Field(alias="clientInfo")
+    client_capabilities: ClientCapabilities = Field(alias="clientCapabilities")
 
 class InitializeResult(BaseModel):
     """Result of initialize request."""
-    session_id: str
-    protocol_version: str
-    server_info: Dict[str, str]
-    server_capabilities: ServerCapabilities
+    session_id: str = Field(alias="sessionId")
+    protocol_version: str = Field(alias="protocolVersion")
+    server_info: Dict[str, str] = Field(alias="serverInfo")
+    server_capabilities: ServerCapabilities = Field(alias="serverCapabilities")
 
     def model_dump(self, *args, **kwargs):
-        """Override model_dump() to ensure all fields are included."""
+        """Override model_dump() to ensure proper camelCase field names."""
+        kwargs.setdefault('by_alias', True)  # Use aliases (camelCase) by default
         base_dict = super().model_dump(*args, **kwargs)
-        base_dict["server_capabilities"] = self.server_capabilities.model_dump()
-        base_dict["server_info"] = self.server_info
-        base_dict["protocol_version"] = self.protocol_version
-        base_dict["session_id"] = self.session_id
         return base_dict
 
 class JsonRpcRequest(BaseModel):
@@ -622,12 +619,12 @@ class McpReferenceServer:
                 response["result"] = {"timestamp": datetime.now().isoformat()}
             
             else:
-                # Method not found - this should return 404 per JSON-RPC over HTTP best practices
+                # Method not found - return 200 with JSON-RPC error per JSON-RPC specification
                 response["error"] = {
                     "code": -32601,  # Method not found
                     "message": f"Method not found: {method}"
                 }
-                return JSONResponse(status_code=404, content=response)  # 404 Not Found for unknown method
+                return JSONResponse(status_code=200, content=response)  # 200 OK with JSON-RPC error
             
             return JSONResponse(content=response)
             

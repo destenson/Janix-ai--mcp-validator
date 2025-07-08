@@ -1,100 +1,76 @@
-# Copyright (c) 2025 Scott Wilcox
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# MCP HTTP Server Testing Module
 
-# MCP HTTP Testing Framework
+This module provides comprehensive testing capabilities for MCP HTTP server implementations, focusing on **strict compliance with the official MCP specification**.
 
-This module provides comprehensive testing capabilities for MCP HTTP server implementations, with full support for OAuth 2.1 authentication flows.
+## Testing Philosophy
+
+This test suite follows the principle of testing **only what is explicitly specified** in the official MCP specification at https://modelcontextprotocol.io. We do not test implementation details or "best practices" that are not mandated by the specification.
 
 ## Features
 
-### Core Testing
-- **Protocol Compliance**: Tests adherence to MCP specifications across all supported versions
-- **Session Management**: Validates proper session handling and state management
-- **Tool Invocation**: Tests both synchronous and asynchronous tool calling
-- **Error Handling**: Validates proper error responses and status codes
+- **Specification-Only Testing**: Tests only behaviors explicitly required by the MCP specification
+- **Protocol Version Support**: Tests compatibility with MCP protocol versions 2024-11-05, 2025-03-26, and 2025-06-18
+- **OAuth 2.1 Authentication**: Comprehensive testing of OAuth 2.1 flows per the 2025-06-18 specification
+- **HTTP Transport Compliance**: Validates proper HTTP transport implementation
+- **Session Management**: Tests session handling where specified
+- **Tool and Resource Testing**: Dynamic testing of available tools and resources
+- **Error Handling**: Tests proper JSON-RPC error responses
 
-### OAuth 2.1 Authentication Testing
-- **401 Response Handling**: Properly handles authentication challenges instead of treating them as failures
-- **WWW-Authenticate Header Parsing**: Extracts and validates authentication challenges
-- **OAuth Server Metadata**: Fetches and validates `.well-known/oauth-authorization-server` endpoints
-- **Bearer Token Support**: Tests proper Bearer token handling and validation
-
-## Components
-
-- **tester.py**: Core `MCPHttpTester` class that implements the test suite
-- **session_validator.py**: `MCPSessionValidator` class for testing server session handling
-- **utils.py**: Helper utilities for server connectivity checks and other common tasks
-- **cli.py**: Command-line interface for running tests
-
-## Usage
-
-### Basic Usage
+## Quick Start
 
 ```python
 from mcp_testing.http.tester import MCPHttpTester
 
-# Create tester instance
-tester = MCPHttpTester("http://localhost:8080/mcp", debug=True)
+# Initialize tester
+tester = MCPHttpTester("http://localhost:8080", debug=True)
 
-# Run comprehensive tests (includes OAuth flow testing)
-success = tester.run_comprehensive_tests()
-
-# Or run basic tests only
-success = tester.run_all_tests()
+# Run comprehensive test suite
+result = tester.run_comprehensive_tests()
 ```
 
-### Command Line Interface
+## Test Categories
 
-```bash
-# Run comprehensive tests (default)
-python -m mcp_testing.http.cli --server-url http://localhost:8080/mcp
+### Core Protocol Tests
+- **Initialization**: Server initialization and capability negotiation
+- **Session Management**: Session handling (where specified)
+- **Tool Operations**: Tool listing and execution
+- **Protocol Version Negotiation**: Multi-version compatibility
 
-# Run basic tests only
-python -m mcp_testing.http.cli --server-url http://localhost:8080/mcp --basic-only
+### HTTP Transport Tests
+- **Status Codes**: Tests only specified HTTP behaviors (invalid JSON, missing method)
+- **Headers**: Required header validation
+- **CORS**: OPTIONS request handling
 
-# Test specific protocol version
-python -m mcp_testing.http.cli --server-url http://localhost:8080/mcp --protocol-version 2025-06-18
+### OAuth 2.1 Authentication Tests (2025-06-18)
+- **Authorization Code Flow**: PKCE-enabled OAuth flow
+- **Token Management**: Token validation and refresh
+- **Error Scenarios**: Proper OAuth error handling
+- **WWW-Authenticate Headers**: Compliance with authentication requirements
 
-# Enable debug output
-python -m mcp_testing.http.cli --server-url http://localhost:8080/mcp --debug
-```
+### Protocol-Specific Features
+- **2025-06-18**: Structured tool output, batch request rejection, elicitation support
+- **2025-03-26**: Async tool support
+- **2024-11-05**: Basic protocol compliance
 
-## OAuth 2.1 Flow Testing
-
-The comprehensive test suite includes OAuth 2.1 authentication flow testing:
-
-### What It Tests
-
-1. **401 Response Handling**: When a server returns 401 Unauthorized, the tester:
-   - ✅ Recognizes this as a proper authentication challenge (not a failure)
-   - ✅ Extracts and parses WWW-Authenticate headers
-   - ✅ Validates Bearer token challenge parameters
-
-2. **OAuth Server Metadata**: Attempts to fetch OAuth server metadata from:
-   - `.well-known/oauth-authorization-server`
-   - Validates required fields: `authorization_endpoint`, `token_endpoint`, `issuer`
-
-3. **Protocol Compliance**: Ensures servers follow OAuth 2.1 and MCP 2025-06-18 specifications
-
-### Example Output
+## Example Test Output
 
 ```
 === MCP HTTP Server Comprehensive Test Suite ===
-Testing OAuth 2.1 authorization flow...
-✅ Server properly returns 401 for unauthenticated requests
-✅ Server provides WWW-Authenticate header
-✅ Server uses Bearer authentication scheme
-✅ OAuth server metadata available
-✅ OAuth metadata contains authorization_endpoint
-✅ OAuth metadata contains token_endpoint
-✅ OAuth metadata contains issuer
+Protocol Version: 2025-06-18
 
-=== Testing HTTP Status Codes ===
+Testing OAuth 2.1 authorization flow...
+✅ Authorization code flow supported
+✅ PKCE S256 method supported
+✅ Token exchange flow validated
+
+=== Testing HTTP Status Codes (MCP Specification Only) ===
 ✅ invalid_json: Got expected status code 400
-✅ no_method: Got expected status code 400
-✅ unknown_method: Got expected status code 404
-✅ authentication_required: Got expected status code 401
-    OAuth challenge detected: True
+    Invalid JSON should return 400 (HTTP standard)
+✅ missing_method: Got expected status code 400
+    Missing method field should return 400 (JSON-RPC requirement)
+
+Note: Tests for unknown_method and invalid_session have been removed
+because they test unspecified HTTP implementation details, not MCP specification compliance.
 
 === Testing HTTP Headers ===
 ✅ content_type: All required headers present and valid
@@ -104,134 +80,60 @@ Testing OAuth 2.1 authorization flow...
 === Testing Protocol Version Negotiation ===
 ✅ Version 2024-11-05: Successfully negotiated (server: 2024-11-05)
 ✅ Version 2025-03-26: Successfully negotiated (server: 2025-03-26)
-✅ Version 2025-06-18: Server requires authentication (OAuth 2.1)
+✅ Version 2025-06-18: Successfully negotiated (server: 2025-06-18)
 
-==================================================
-✅ ALL TESTS PASSED
-Server is fully compliant with MCP specification
-==================================================
+🎉 SERVER IS FULLY COMPLIANT WITH MCP SPECIFICATION
+   All core functionality and protocol-specific features validated
+   ✅ OAuth 2.1 authentication flow validated
+   ✅ WWW-Authenticate header handling compliant
+   ✅ MCP 2025-06-18 specific features validated
 ```
 
-## Implementation Notes
+## Removed Tests
 
-### Key Changes from Previous Versions
+The following tests have been **intentionally removed** because they test unspecified implementation details:
 
-1. **401 Not a Failure**: 401 responses are now properly handled as authentication challenges rather than test failures
-2. **OAuth Flow Recognition**: The tester recognizes and validates OAuth 2.1 authentication flows
-3. **Well-Known Endpoint Support**: Automatically fetches OAuth server metadata when available
-4. **Flexible Response Handling**: Adapts to servers that require authentication vs. those that don't
+- **unknown_method**: The MCP specification does not mandate specific HTTP status codes for unknown JSON-RPC methods
+- **invalid_session**: Session validation behavior is not clearly specified in the MCP protocol
 
-### Backward Compatibility
+This aligns with our philosophy of testing only what is explicitly specified in the official MCP documentation.
 
-The framework maintains backward compatibility:
-- `run_all_tests()` still available for basic testing
-- `run_comprehensive_tests()` includes new OAuth flow testing
-- All existing test methods remain unchanged
+## Configuration
 
-## Testing Different Server Types
-
-### No Authentication Required
-- Server responds with 200 OK to requests
-- Tests proceed normally
-- Result: ✅ Server doesn't require authentication
-
-### OAuth 2.1 Required
-- Server responds with 401 Unauthorized
-- Includes WWW-Authenticate header with Bearer challenge
-- Provides OAuth server metadata at `.well-known/oauth-authorization-server`
-- Result: ✅ Server requires authentication (OAuth 2.1)
-
-### Legacy Authentication
-- Server responds with 401 Unauthorized
-- May or may not include WWW-Authenticate header
-- No OAuth server metadata available
-- Result: ⚠️ Server requires authentication (legacy method)
-
-## Future Enhancements
-
-Planned improvements include:
-- **Full OAuth Flow Testing**: Complete authorization code flow testing
-- **Token Refresh Testing**: Validation of token refresh mechanisms
-- **Scope Validation**: Testing of OAuth scope requirements
-- **PKCE Support**: Testing of Proof Key for Code Exchange
-
-## Comprehensive Testing Script
-
-For advanced testing scenarios, use the comprehensive testing script:
-
-```bash
-# Run all tests (basic, OAuth, comprehensive, security)
-python -m mcp_testing.scripts.comprehensive_http_test --server-url http://localhost:8080/mcp --test-type all
-
-# Run only OAuth 2.1 validation
-python -m mcp_testing.scripts.comprehensive_http_test --server-url http://localhost:8080/mcp --test-type oauth
-
-# Run security-focused validation
-python -m mcp_testing.scripts.comprehensive_http_test --server-url http://localhost:8080/mcp --test-type security
-
-# Generate detailed compliance report
-python -m mcp_testing.scripts.comprehensive_http_test --server-url http://localhost:8080/mcp --output compliance_report.json
+### Basic Configuration
+```python
+tester = MCPHttpTester("http://localhost:8080", debug=True)
 ```
 
-### Advanced Features Implemented
+### Protocol Version Testing
+```python
+# Test specific protocol version
+tester.protocol_version = "2025-06-18"
+result = tester.run_comprehensive_tests()
+```
 
-✅ **Complete OAuth 2.1 Implementation**
-- Authorization code flow with PKCE validation
-- Token refresh mechanism testing
-- Scope validation and enforcement testing
-- Resource indicators (RFC 8707) support
+## API Reference
 
-✅ **Enhanced Authentication Testing**
-- OAuth error scenario validation (invalid_client, invalid_grant, invalid_scope)
-- Token audience claim validation (prevents confused deputy attacks)
-- Bearer token format and usage compliance
+### MCPHttpTester Class
 
-✅ **Protocol Compliance Testing**
-- WWW-Authenticate header flexibility (MUST → SHOULD change)
-- MCP 2025-06-18 structured tool output validation
-- Batch request rejection testing (removed in 2025-06-18)
-- Elicitation support framework testing
+Main testing class for MCP HTTP server validation.
 
-✅ **Security Validation**
-- Confused deputy attack prevention
-- Session security validation
-- CORS compliance verification
-- Token passthrough prevention
+#### Methods
 
-### Test Categories
+- `run_comprehensive_tests()`: Execute full test suite
+- `initialize()`: Test server initialization
+- `list_tools()`: Test tool listing
+- `test_available_tools()`: Test all available tools
+- `test_oauth_flow()`: Test OAuth 2.1 authentication
+- `test_status_codes()`: Test HTTP status code handling
+- `test_headers()`: Test HTTP header compliance
+- `test_protocol_versions()`: Test version negotiation
 
-**Basic Tests**: Core MCP functionality (initialization, tool listing, tool calls)
-**OAuth Tests**: OAuth 2.1 authentication flow validation
-**Comprehensive Tests**: All basic + OAuth + protocol compliance + security
-**Security Tests**: Focused security and OAuth security validation
+## Contributing
 
-## Test Coverage
+When adding new tests, ensure they test **only behaviors explicitly specified** in the MCP specification. Do not add tests for:
+- Implementation-specific HTTP status codes
+- Unspecified error handling behavior
+- Custom extensions or "best practices"
 
-The HTTP testing module currently tests:
-
-1. **CORS Support**: Verifies that the server properly handles OPTIONS requests and returns CORS headers
-2. **Initialization**: Tests the server's ability to initialize and return a session ID
-3. **Tools Listing**: Verifies that the server can list available tools
-4. **Tool Execution**: Tests basic tool execution (echo, add)
-5. **Async Tools**: Tests async tool execution with the sleep tool
-6. **Session Handling**: Tests server's ability to maintain and validate sessions via the `Mcp-Session-Id` header
-
-### Session Test Coverage
-
-The session validator specifically tests:
-
-1. **Session Creation**: Tests that the server generates a valid session ID during initialization
-2. **Session Validation**: Tests that the server properly accepts or rejects requests based on session ID validity
-3. **Session Persistence**: Tests that the server maintains state across multiple requests with the same session ID
-4. **Missing Session**: Tests server behavior when session ID is not provided
-5. **Invalid Session**: Tests server behavior when an invalid session ID is provided
-
-## Adding New Tests
-
-To add new tests, add methods to the `MCPHttpTester` class in `tester.py` or the `MCPSessionValidator` class in `session_validator.py`. Tests should:
-
-1. Return `True` if passing, `False` if failing
-2. Print clear error messages
-3. Handle exceptions gracefully
-
-Add your new test method to the list in the `run_all_tests` method to include it in the full test suite. 
+All tests should reference the specific section of the MCP specification they validate. 
