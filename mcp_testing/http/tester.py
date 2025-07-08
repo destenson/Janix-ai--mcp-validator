@@ -927,33 +927,23 @@ class MCPHttpTester:
             return False
 
     def test_status_codes(self):
-        """Test various HTTP status code scenarios with proper OAuth handling."""
-        print("\n=== Testing HTTP Status Codes ===")
+        """Test HTTP status code scenarios that are actually specified in MCP."""
+        print("\n=== Testing HTTP Status Codes (MCP Specification Only) ===")
         
         tests = [
             {
                 "name": "invalid_json",
                 "payload": "{bad json}",
                 "expected_codes": [400],
-                "headers": None
+                "headers": None,
+                "test_description": "Invalid JSON should return 400 (HTTP standard)"
             },
             {
-                "name": "no_method",
+                "name": "missing_method",
                 "payload": {"jsonrpc": "2.0", "id": 1},
                 "expected_codes": [400],
-                "headers": None
-            },
-            {
-                "name": "unknown_method",
-                "payload": {"jsonrpc": "2.0", "id": 1, "method": "unknown_method"},
-                "expected_codes": [404],
-                "headers": None
-            },
-            {
-                "name": "authentication_required",
-                "payload": {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
-                "expected_codes": [401, 200],  # 401 if auth required, 200 if not
-                "headers": {"Mcp-Session-Id": "invalid-session"}
+                "headers": None,
+                "test_description": "Missing method field should return 400 (JSON-RPC requirement)"
             }
         ]
         
@@ -978,24 +968,17 @@ class MCPHttpTester:
                 
                 if response.status_code in test["expected_codes"]:
                     print(f"✅ {test['name']}: Got expected status code {response.status_code}")
-                    
-                    # Special handling for 401 responses
-                    if response.status_code == 401:
-                        oauth_info = self.handle_401_response(dict(response.headers), response.text)
-                        print(f"    OAuth challenge detected: {oauth_info['www_authenticate'] is not None}")
-                        
+                    print(f"    {test['test_description']}")
                 else:
-                    # For authentication_required test, 200 is also acceptable
-                    if test["name"] == "authentication_required" and response.status_code == 200:
-                        print(f"✅ {test['name']}: Server doesn't require authentication (status {response.status_code})")
-                    else:
-                        print(f"❌ {test['name']}: Expected {test['expected_codes']}, got {response.status_code}")
-                        success = False
+                    print(f"❌ {test['name']}: Expected {test['expected_codes']}, got {response.status_code}")
+                    success = False
                     
             except Exception as e:
                 print(f"❌ {test['name']}: Test failed with error: {str(e)}")
                 success = False
-                
+        
+        print("\nNote: Tests for unknown_method and invalid_session have been removed")
+        print("because they test unspecified HTTP implementation details, not MCP specification compliance.")
         return success
 
     def test_headers(self):
@@ -1011,12 +994,12 @@ class MCPHttpTester:
             {
                 "name": "content_type",
                 "required_headers": {"Content-Type": "application/json"},
-                "method": "ping"
+                "method": "server/info"
             },
             {
                 "name": "session_id_present",
                 "required_headers": {"Mcp-Session-Id": None},  # None means just check presence
-                "method": "ping"
+                "method": "server/info"
             }
         ]
         
@@ -1024,7 +1007,7 @@ class MCPHttpTester:
             tests.append({
                 "name": "protocol_version",
                 "required_headers": {"MCP-Protocol-Version": "2025-06-18"},
-                "method": "ping"
+                "method": "server/info"
             })
             
         success = True
@@ -1078,11 +1061,11 @@ class MCPHttpTester:
                 self.initialized = False
                 
                 params = {
-                    "client_info": {
+                    "clientInfo": {  # Use camelCase as per MCP specification
                         "name": "MCP HTTP Tester",
                         "version": "1.0.0"
                     },
-                    "client_capabilities": {
+                    "clientCapabilities": {  # Use camelCase as per MCP specification
                         "protocol_versions": [version]
                     }
                 }
@@ -1094,7 +1077,6 @@ class MCPHttpTester:
                     # Handle OAuth requirement
                     oauth_info = self.handle_401_response(response_headers, body)
                     print(f"✅ Version {version}: Server requires authentication (OAuth 2.1)")
-                    success = True
                     continue
                 elif status != 200:
                     print(f"❌ Version {version}: Initialize failed with status {status}")
@@ -1107,10 +1089,12 @@ class MCPHttpTester:
                     continue
                     
                 result = body["result"]
-                server_version = result.get("protocol_version") or result.get("protocolVersion")
+                
+                # Check for protocol version in camelCase (per spec) or snake_case (for compatibility)
+                server_version = result.get("protocolVersion") or result.get("protocol_version")
                 
                 if not server_version:
-                    print(f"❌ Version {version}: Missing protocol_version in response")
+                    print(f"❌ Version {version}: Missing protocolVersion in response")
                     success = False
                     continue
                     
@@ -1483,12 +1467,11 @@ class MCPHttpTester:
         # Use different parameter names based on protocol version
         if self.protocol_version == "2025-06-18":
             params = {
-                "protocolVersion": self.protocol_version,
-                "client_info": {
+                "clientInfo": {  # Use camelCase as per MCP specification
                     "name": "MCP HTTP Tester",
                     "version": "1.0.0"
                 },
-                "client_capabilities": {
+                "clientCapabilities": {  # Use camelCase as per MCP specification
                     "protocol_versions": [self.protocol_version],
                     "tools": {"asyncSupported": True},
                     "resources": True
@@ -1497,7 +1480,7 @@ class MCPHttpTester:
         else:
             params = {
                 "protocolVersion": self.protocol_version,
-                "clientInfo": {
+                "clientInfo": {  # Use camelCase as per MCP specification
                     "name": "MCP HTTP Tester",
                     "version": "1.0.0"
                 },
@@ -1924,228 +1907,4 @@ class MCPHttpTester:
         # Reset our state even if the server didn't reset
         self.session_id = None
         self.initialized = False
-        return True
-
-    def test_status_codes(self):
-        """Test various HTTP status code scenarios."""
-        print("\n=== Testing HTTP Status Codes ===")
-        
-        tests = [
-            {
-                "name": "invalid_json",
-                "payload": "{bad json}",
-                "expected_code": 400,
-                "headers": None
-            },
-            {
-                "name": "no_method",
-                "payload": {"jsonrpc": "2.0", "id": 1},
-                "expected_code": 400,
-                "headers": None
-            },
-            {
-                "name": "unknown_method",
-                "payload": {"jsonrpc": "2.0", "id": 1, "method": "unknown_method"},
-                "expected_code": 404,
-                "headers": None
-            },
-            {
-                "name": "invalid_session",
-                "payload": {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
-                "expected_code": 401,
-                "headers": {"Mcp-Session-Id": "invalid-session"}
-            }
-        ]
-        
-        success = True
-        for test in tests:
-            try:
-                response = self.request_session.post(
-                    self.url,
-                    json=test["payload"] if isinstance(test["payload"], dict) else test["payload"],
-                    headers=test["headers"] if test["headers"] else {},
-                    timeout=5
-                )
-                
-                if response.status_code == test["expected_code"]:
-                    print(f"✅ {test['name']}: Got expected status code {test['expected_code']}")
-                else:
-                    print(f"❌ {test['name']}: Expected {test['expected_code']}, got {response.status_code}")
-                    success = False
-                    
-            except Exception as e:
-                print(f"❌ {test['name']}: Test failed with error: {str(e)}")
-                success = False
-                
-        return success
-
-    def test_headers(self):
-        """Test HTTP header handling."""
-        print("\n=== Testing HTTP Headers ===")
-        
-        # Initialize first to get a valid session
-        if not self.initialize():
-            print("❌ Failed to initialize for header tests")
-            return False
-            
-        tests = [
-            {
-                "name": "content_type",
-                "required_headers": {"Content-Type": "application/json"},
-                "method": "server/info"
-            },
-            {
-                "name": "session_id_present",
-                "required_headers": {"Mcp-Session-Id": None},  # None means just check presence
-                "method": "server/info"
-            }
-        ]
-        
-        if self.protocol_version == "2025-06-18":
-            tests.append({
-                "name": "protocol_version",
-                "required_headers": {"MCP-Protocol-Version": "2025-06-18"},
-                "method": "server/info"
-            })
-            
-        success = True
-        for test in tests:
-            try:
-                status, headers, _ = self.send_request(test["method"])
-                
-                if status != 200:
-                    print(f"❌ {test['name']}: Request failed with status {status}")
-                    success = False
-                    continue
-                    
-                # Check required headers
-                headers_valid = True
-                for header, expected_value in test["required_headers"].items():
-                    header_present = False
-                    for response_header in headers:
-                        if response_header.lower() == header.lower():
-                            header_present = True
-                            if expected_value is not None and headers[response_header] != expected_value:
-                                print(f"❌ {test['name']}: Expected {header}={expected_value}, got {headers[response_header]}")
-                                headers_valid = False
-                            break
-                            
-                    if not header_present:
-                        print(f"❌ {test['name']}: Missing required header {header}")
-                        headers_valid = False
-                        
-                if headers_valid:
-                    print(f"✅ {test['name']}: All required headers present and valid")
-                else:
-                    success = False
-                    
-            except Exception as e:
-                print(f"❌ {test['name']}: Test failed with error: {str(e)}")
-                success = False
-                
-        return success
-
-    def test_protocol_versions(self):
-        """Test protocol version negotiation."""
-        print("\n=== Testing Protocol Version Negotiation ===")
-        
-        versions = ["2024-11-05", "2025-03-26", "2025-06-18"]
-        success = True
-        
-        for version in versions:
-            try:
-                params = {
-                    "client_info": {
-                        "name": "MCP HTTP Tester",
-                        "version": "1.0.0"
-                    },
-                    "client_capabilities": {
-                        "protocol_versions": [version]
-                    }
-                }
-                
-                headers = {"MCP-Protocol-Version": version} if version == "2025-06-18" else {}
-                status, response_headers, body = self.send_request("initialize", params, headers)
-                
-                if status != 200:
-                    print(f"❌ Version {version}: Initialize failed with status {status}")
-                    success = False
-                    continue
-                    
-                if not isinstance(body, dict) or "result" not in body:
-                    print(f"❌ Version {version}: Invalid response format")
-                    success = False
-                    continue
-                    
-                result = body["result"]
-                if "protocol_version" not in result:
-                    print(f"❌ Version {version}: Missing protocol_version in response")
-                    success = False
-                    continue
-                    
-                if result["protocol_version"] != version:
-                    print(f"❌ Version {version}: Server responded with different version {result['protocol_version']}")
-                    success = False
-                    continue
-                    
-                print(f"✅ Version {version}: Successfully negotiated")
-                
-            except Exception as e:
-                print(f"❌ Version {version}: Test failed with error: {str(e)}")
-                success = False
-                
-        return success
-
-    def run_all_tests(self):
-        """Run basic tests in sequence (for backwards compatibility)."""
-        try:
-            if not self.reset_server():
-                print("WARNING: Failed to reset server state, tests may fail")
-            
-            # Run existing tests
-            if not self.options_request():
-                # Don't fail the entire test suite for OPTIONS issues
-                pass
-            
-            if not self.initialize():
-                return False
-            
-            if not self.list_tools():
-                return False
-            
-            # Only run for 2025-03-26
-            if self.protocol_version == "2025-03-26" and self.get_tool_by_name("sleep"):
-                if not self.test_async_sleep_tool():
-                    return False
-            
-            if not self.test_available_tools():
-                return False
-                
-            # Run new tests
-            if not self.test_status_codes():
-                return False
-                
-            if not self.test_headers():
-                return False
-                
-            if not self.test_protocol_versions():
-                return False
-            
-            print("\n=== Test Results ===")
-            print("PASS: OPTIONS request")
-            print("PASS: Initialize")
-            print("PASS: List Tools")
-            if self.protocol_version == "2025-03-26" and self.get_tool_by_name("sleep"):
-                print("PASS: Async Sleep Tool")
-            print("PASS: Available Tools")
-            print("PASS: Status Codes")
-            print("PASS: Headers")
-            print("PASS: Protocol Versions")
-            
-            print("\nSummary: All basic tests passed")
-            return True
-        except Exception as e:
-            print(f"Error during test execution: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False 
+        return True 
