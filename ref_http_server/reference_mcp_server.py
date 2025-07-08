@@ -59,12 +59,19 @@ class ClientCapabilities(BaseModel):
 
 class ServerCapabilities(BaseModel):
     """Server capabilities returned during initialization."""
-    protocol_versions: List[str]
+    protocol_versions: List[str] = Field(alias="protocolVersions")
     logging: Dict[str, Any] = {}
     prompts: Dict[str, bool] = {"listChanged": True}
     resources: Dict[str, bool] = {"subscribe": True, "listChanged": True}
     tools: Dict[str, bool] = {"listChanged": True}
     elicitation: Optional[Dict[str, Any]] = {}  # New in 2025-06-18
+
+    def model_dump(self, *args, **kwargs):
+        """Override model_dump() to ensure proper camelCase field names for JSON output."""
+        # Only use aliases when dumping to JSON for external API
+        if 'by_alias' not in kwargs:
+            kwargs['by_alias'] = True
+        return super().model_dump(*args, **kwargs)
 
 class InitializeParams(BaseModel):
     """Parameters for initialize request."""
@@ -329,17 +336,17 @@ class McpReferenceServer:
         logger.info(f"Created new session: {session_id} with protocol {selected_version}")
         
         # Return session ID and server capabilities
-        return InitializeResult(
-            session_id=session_id,
-            protocol_version=selected_version,  # Use negotiated version
-            server_info={
+        return InitializeResult.model_validate({
+            "sessionId": session_id,
+            "protocolVersion": selected_version,
+            "serverInfo": {
                 "name": self.name,
                 "version": "1.0.0"
             },
-            server_capabilities=ServerCapabilities(
-                protocol_versions=self.protocol_versions
-            )
-        )
+            "serverCapabilities": {
+                "protocolVersions": self.protocol_versions
+            }
+        })
     
     def get_session(self, session_id: str) -> Dict[str, Any]:
         """Get session by ID, raising exception if not found."""
