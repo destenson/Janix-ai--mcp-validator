@@ -41,6 +41,16 @@ class StdioTransportAdapter(MCPTransportAdapter):
         self.timeout = timeout
         self.process = None
     
+    def __del__(self):
+        """Clean up on deletion to avoid Windows file descriptor issues"""
+        # Suppress all errors during cleanup
+        try:
+            if hasattr(self, 'process') and self.process is not None:
+                # Don't try to stop, just clean up references
+                self.process = None
+        except:
+            pass
+    
     def start(self) -> bool:
         """
         Start the server process.
@@ -132,11 +142,37 @@ class StdioTransportAdapter(MCPTransportAdapter):
                 except subprocess.TimeoutExpired:
                     if self.debug:
                         print("Process did not terminate, killing")
-                    self.process.kill()
-                    self.process.wait()
+                    try:
+                        self.process.kill()
+                        self.process.wait()
+                    except Exception as kill_e:
+                        if self.debug:
+                            print(f"Failed to kill process: {str(kill_e)}")                    
             
             self.is_started = False
-            self.process = None
+            # Clean up process reference without triggering Windows file descriptor issues
+            if self.process is not None:
+                try:
+                    # Close the file handles explicitly before clearing the reference
+                    if hasattr(self.process.stdin, 'close'):
+                        try:
+                            self.process.stdin.close()
+                        except:
+                            pass
+                    if hasattr(self.process.stdout, 'close'):
+                        try:
+                            self.process.stdout.close()
+                        except:
+                            pass
+                    if hasattr(self.process.stderr, 'close'):
+                        try:
+                            self.process.stderr.close()
+                        except:
+                            pass
+                except:
+                    pass
+                finally:
+                    self.process = None
             return True
             
         except Exception as e:
